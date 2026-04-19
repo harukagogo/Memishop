@@ -1625,6 +1625,30 @@ function pickOldestHeld(kind, product, count) {
   return candidates.slice(0, count);
 }
 
+// FIFO 挑選持有中的單卡：按 cardTitle 比對，優先取得時間最舊的（買入或開箱日期）
+function pickOldestHeldCards(title, count) {
+  const candidates = state.cards.filter(c => cardStatus(c) === 'held' && cardTitle(c) === title);
+  candidates.sort((a, b) => {
+    // 取得日期：買入卡用 purchase.date；開箱卡用 opening.date；都沒有則空字串
+    const dateOf = (c) => {
+      if (c.source_purchase_id) {
+        const p = state.purchases.find(x => x.id === c.source_purchase_id);
+        return p?.date || '';
+      }
+      if (c.source_opening_id) {
+        const o = state.openings.find(x => x.id === c.source_opening_id);
+        return o?.date || '';
+      }
+      return '';
+    };
+    const da = dateOf(a);
+    const db = dateOf(b);
+    if (da !== db) return da < db ? -1 : 1;
+    return 0;
+  });
+  return candidates.slice(0, count);
+}
+
 function showOpenBoxModal() {
   const boxGroups = groupHeldByProduct('box');
   const packetGroups = groupHeldByProduct('packet');
@@ -1793,7 +1817,16 @@ function showSellModal() {
   const hC = state.cards.filter(c => cardStatus(c) === 'held');
   const boxGroupList = Object.entries(boxGroups);
   const packetGroupList = Object.entries(packetGroups);
-  const hasInv = boxGroupList.length + packetGroupList.length + hC.length > 0;
+
+  // 把單卡按 cardTitle 分組（同名同編號合併）
+  const cardGroupsMap = {};
+  for (const c of hC) {
+    const title = cardTitle(c);
+    if (!cardGroupsMap[title]) cardGroupsMap[title] = { items: [], cardObj: c };
+    cardGroupsMap[title].items.push(c);
+  }
+  const cardGroupList = Object.entries(cardGroupsMap);
+  const hasInv = boxGroupList.length + packetGroupList.length + cardGroupList.length > 0;
 
   // Group row (boxes / packets): show quantity selector
   const mkGroupRow = (kind, product, group) => {
@@ -1808,18 +1841,22 @@ function showSellModal() {
     </label>`;
   };
 
-  // Card row: individual
-  const mkCardRow = (card) => `
+  // Card group row: 同 (卡名+編號) 集合為一列，可選擇張數
+  const mkCardGroupRow = (title, group) => {
+    const unitCost = group.items.reduce((s, x) => s + num(x.cost_hkd), 0) / group.items.length;
+    return `
     <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.55rem;border-bottom:1px solid var(--border-soft);cursor:pointer">
-      <input type="checkbox" class="sl-check" data-kind="card" data-card-id="${card.id}" data-unit-cost="${num(card.cost_hkd)}" style="width:auto;accent-color:var(--gold)">
-      <span style="flex:1;font-size:0.85rem">[卡] ${escapeHTML(cardTitle(card))}</span>
-      <span style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim)">${fmt(card.cost_hkd)}</span>
+      <input type="checkbox" class="sl-check" data-kind="card-group" data-title="${escapeHTML(title)}" data-unit-cost="${unitCost}" data-max="${group.items.length}" style="width:auto;accent-color:var(--gold)">
+      <span style="flex:1;font-size:0.85rem">[卡] ${escapeHTML(title)} <span style="color:var(--text-dim);font-size:0.78rem">(持有 ${group.items.length})</span></span>
+      <input type="number" class="sl-qty" min="1" max="${group.items.length}" value="1" style="width:55px;font-family:var(--font-mono);font-size:0.78rem;padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-align:right">
+      <span style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim);min-width:60px;text-align:right">${fmt(unitCost)}/張</span>
       <input type="number" class="sl-item-price" step="0.01" placeholder="金額" style="width:90px;display:none;font-family:var(--font-mono);font-size:0.8rem;padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">
     </label>`;
+  };
 
   const bo = boxGroupList.map(([p, g]) => mkGroupRow('box', p, g)).join('');
   const po = packetGroupList.map(([p, g]) => mkGroupRow('packet', p, g)).join('');
-  const co = hC.map(c => mkCardRow(c)).join('');
+  const co = cardGroupList.map(([title, group]) => mkCardGroupRow(title, group)).join('');
   const cur = CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('');
 
   document.getElementById('modal-content').innerHTML = `
@@ -1852,7 +1889,7 @@ function showSellModal() {
       </div>
       <div class="modal-field">
         <label>選擇要賣的項目</label>
-        <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:0.3rem">盒/包可設定數量（系統自動從舊到新扣除）· 單卡逐張勾選</div>
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:0.3rem">盒、包、單卡都按相同商品分組 · 設定數量後系統自動從買入日期最舊的開始扣</div>
         <div style="border:1px solid var(--border);background:var(--bg);max-height:280px;overflow-y:auto">${hasInv ? (bo+po+co) : '<div style="padding:1rem;color:var(--text-dim);text-align:center">目前沒有可售的庫存</div>'}</div>
       </div>
     </div>
@@ -1962,8 +1999,8 @@ function confirmSell() {
   if (checked.length === 0) { toast('請至少選一個項目', true); return; }
 
   // Expand each checked row into concrete targets
-  // For group rows (box/packet): pick N oldest items from that product
-  // For card rows: single target
+  // For group rows (box/packet/card-group): pick N oldest items
+  // For card rows (legacy single): single target
   const selections = []; // each: { targets: [{type, id, cost}], unitPriceEl, label }
   for (const el of checked) {
     const row = el.closest('label');
@@ -1982,6 +2019,20 @@ function confirmSell() {
         targets: picked.map(p => ({ type: kind, id: p.id, cost: num(p.cost_hkd) })),
         unitPriceEl: priceEl,
         label: `${kind === 'box' ? '盒' : '包'} ${product} ×${qty}`
+      });
+    } else if (el.dataset.kind === 'card-group') {
+      const title = el.dataset.title;
+      const qtyEl = row.querySelector('.sl-qty');
+      const qty = Math.max(1, Math.floor(num(qtyEl?.value || 1)));
+      const picked = pickOldestHeldCards(title, qty);
+      if (picked.length < qty) {
+        toast(`「${title}」只有 ${picked.length} 張可售`, true);
+        return;
+      }
+      selections.push({
+        targets: picked.map(c => ({ type: 'card', id: c.id, cost: num(c.cost_hkd) })),
+        unitPriceEl: priceEl,
+        label: `卡 ${title} ×${qty}`
       });
     } else if (el.dataset.kind === 'card') {
       const cardId = el.dataset.cardId;
