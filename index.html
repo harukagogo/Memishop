@@ -525,19 +525,38 @@ function sortArray(arr, kind, extractor) {
   const cfg = sortState[kind];
   if (!cfg) return arr.slice();
   const sorted = arr.slice();
+
+  // Date detector: YYYY-MM-DD or YYYY/MM/DD
+  const isDateStr = s => typeof s === 'string' && /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(s.trim());
+  // Pure-number detector: rejects things like "2026-03-15" which parseFloat eats as 2026
+  const isPureNum = v => {
+    if (typeof v === 'number') return Number.isFinite(v);
+    if (typeof v !== 'string') return false;
+    const t = v.trim();
+    if (t === '') return false;
+    return /^-?\d+(\.\d+)?$/.test(t);
+  };
+
   sorted.sort((a, b) => {
     let va = extractor(a, cfg.field);
     let vb = extractor(b, cfg.field);
-    // Normalize for comparison
     if (va == null) va = '';
     if (vb == null) vb = '';
-    const na = parseFloat(va);
-    const nb = parseFloat(vb);
+
     let cmp;
-    if (Number.isFinite(na) && Number.isFinite(nb) && String(va).trim() !== '' && String(vb).trim() !== '') {
-      cmp = na - nb;
+    if (isDateStr(va) && isDateStr(vb)) {
+      cmp = String(va).localeCompare(String(vb));
+    } else if (isPureNum(va) && isPureNum(vb)) {
+      cmp = parseFloat(va) - parseFloat(vb);
+    } else if (typeof va === 'number' && typeof vb === 'number') {
+      cmp = va - vb;
     } else {
-      cmp = String(va).localeCompare(String(vb), 'zh-Hant');
+      // Empty strings last
+      const ea = String(va).trim() === '';
+      const eb = String(vb).trim() === '';
+      if (ea && !eb) cmp = 1;
+      else if (!ea && eb) cmp = -1;
+      else cmp = String(va).localeCompare(String(vb), 'zh-Hant');
     }
     return cfg.dir === 'asc' ? cmp : -cmp;
   });
@@ -717,13 +736,23 @@ function escapeHTML(s) {
 }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
-// 單卡標題：卡名 #編號 · 兩者都空則回 '(未命名)'
+// 單卡標題：「商品編號 #卡編號」或「卡名 #卡編號」
+// 規則：優先顯示「商品編號」（例 M2），再加「卡名」（若有），再加「#卡編號」
 function cardTitle(c) {
-  const name = (c?.card_name || '').trim();
-  const number = (c?.card_number || '').trim();
-  if (name && number) return `${name} ${number.startsWith('#') ? number : '#' + number}`;
-  if (name) return name;
-  if (number) return number.startsWith('#') ? number : '#' + number;
+  if (!c) return '(未命名)';
+  const box = (c.box_code || '').trim();       // 商品編號 M2 / SV9a
+  const name = (c.card_name || '').trim();     // 卡名 (可空)
+  let number = (c.card_number || '').trim();   // 卡編號
+  if (number && !number.startsWith('#')) number = '#' + number;
+
+  const parts = [];
+  if (box) parts.push(box);
+  if (name) parts.push(name);
+  const head = parts.join(' ');
+
+  if (head && number) return head + ' ' + number;
+  if (head) return head;
+  if (number) return number;
   return '(未命名)';
 }
 
