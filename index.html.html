@@ -1,0 +1,1578 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memi鋪 · 卡牌庫存帳</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;800&family=Noto+Sans+TC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1217; --surface: #171b22; --surface-2: #1f2430;
+    --border: #2a303e; --border-soft: rgba(42, 48, 62, 0.5);
+    --text: #e8e4d8; --text-dim: #8a8778; --text-muted: #5a5a50;
+    --gold: #d4a04c; --gold-dim: #9a7538;
+    --green: #89b87a; --red: #d26a55; --blue: #6ba8d2;
+    --font-display: 'Noto Serif TC', serif;
+    --font-body: 'Noto Sans TC', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--font-body); font-weight: 300;
+    font-size: 14px; line-height: 1.5; min-height: 100vh;
+  }
+  body {
+    background-image:
+      radial-gradient(circle at 15% 10%, rgba(212, 160, 76, 0.05) 0%, transparent 45%),
+      radial-gradient(circle at 85% 80%, rgba(212, 160, 76, 0.03) 0%, transparent 45%);
+    background-attachment: fixed;
+  }
+  .container { max-width: 1400px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+
+  header.hero {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1.5rem; margin-bottom: 2rem; gap: 1rem;
+  }
+  .hero-title {
+    font-family: var(--font-display); font-size: clamp(2.5rem, 5vw, 4rem);
+    font-weight: 800; line-height: 0.9; color: var(--gold);
+  }
+  .hero-subtitle {
+    font-family: var(--font-display); font-style: italic; color: var(--text-dim);
+    font-size: 0.9rem; margin-top: 0.5rem;
+  }
+  .hero-meta { text-align: right; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
+  .hero-meta-tag { display: block; margin-bottom: 0.4rem; letter-spacing: 0.1em; }
+  .sync-indicator {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    padding: 0.3rem 0.75rem; border: 1px solid var(--border);
+    border-radius: 100px; font-size: 0.7rem; max-width: 280px;
+  }
+  .sync-indicator #sync-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sync-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; flex-shrink: 0; }
+  .sync-dot.loading { background: var(--gold); animation: pulse 1s infinite; }
+  .sync-dot.error { background: var(--red); animation: none; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  nav.tabs {
+    display: flex; gap: 1.5rem; border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem; overflow-x: auto; scrollbar-width: none;
+  }
+  nav.tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    background: none; border: none; color: var(--text-dim);
+    font-family: var(--font-display); font-size: 1.1rem;
+    padding: 0.8rem 0.3rem; cursor: pointer;
+    border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+  .tab-count { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); margin-left: 0.3rem; vertical-align: super; }
+  .tab.active .tab-count { color: var(--gold-dim); }
+
+  .dashboard-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem; margin-bottom: 1.5rem;
+  }
+  .metric-card {
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 1.2rem 1.4rem; position: relative;
+  }
+  .metric-card.highlight { border-color: var(--gold-dim); }
+  .metric-card.highlight::before {
+    content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: var(--gold-dim);
+  }
+  .metric-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.15em; margin-bottom: 0.4rem; }
+  .metric-label-zh { font-family: var(--font-display); font-size: 0.9rem; color: var(--text-dim); margin-bottom: 0.4rem; }
+  .metric-value { font-family: var(--font-mono); font-size: 1.4rem; font-weight: 500; color: var(--text); }
+  .metric-value.positive { color: var(--green); }
+  .metric-value.negative { color: var(--red); }
+  .metric-unit { font-size: 0.65rem; color: var(--text-muted); margin-left: 0.3rem; }
+  .metric-sub { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); margin-top: 0.3rem; }
+
+  .breakdown-section { margin-top: 1.5rem; }
+  .breakdown-title { font-family: var(--font-display); font-size: 1.2rem; color: var(--text); margin-bottom: 0.8rem; }
+  .breakdown-table {
+    width: 100%; border-collapse: collapse;
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .breakdown-table th, .breakdown-table td {
+    padding: 0.6rem 0.8rem; text-align: left;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .breakdown-table th {
+    background: var(--surface-2); color: var(--gold);
+    font-family: var(--font-display); font-weight: 500; font-size: 0.8rem;
+  }
+  .breakdown-table td.num { font-family: var(--font-mono); text-align: right; }
+  .breakdown-table td.num.positive { color: var(--green); }
+  .breakdown-table td.num.negative { color: var(--red); }
+
+  .section { display: none; }
+  .section.active { display: block; }
+  .section-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;
+  }
+  .section-title { font-family: var(--font-display); font-size: 1.8rem; color: var(--text); }
+  .section-title .slug { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem; margin-left: 0.6rem; }
+  .section-desc { color: var(--text-dim); font-size: 0.8rem; margin-top: 0.3rem; font-style: italic; font-family: var(--font-display); }
+
+  .btn {
+    font-family: var(--font-body); font-weight: 500; font-size: 0.85rem;
+    padding: 0.5rem 1rem; background: transparent;
+    color: var(--text-dim); border: 1px solid var(--border);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .btn:hover { color: var(--text); border-color: var(--text-dim); }
+  .btn-primary { background: var(--gold); color: var(--bg); border-color: var(--gold); }
+  .btn-primary:hover { background: var(--gold-dim); border-color: var(--gold-dim); }
+  .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+  .table-wrapper { overflow-x: auto; border: 1px solid var(--border); background: var(--surface); }
+  .data-table { width: 100%; border-collapse: collapse; font-family: var(--font-body); font-size: 0.82rem; }
+  .data-table thead { background: var(--surface-2); border-bottom: 1px solid var(--border); }
+  .data-table th {
+    font-family: var(--font-display); font-size: 0.8rem; font-weight: 500;
+    text-align: left; padding: 0.7rem 0.6rem; color: var(--gold);
+    white-space: nowrap; border-right: 1px solid var(--border);
+  }
+  .data-table th:last-child { border-right: none; }
+  .data-table td {
+    padding: 0; border-bottom: 1px solid var(--border-soft);
+    border-right: 1px solid var(--border-soft); vertical-align: middle;
+  }
+  .data-table td:last-child { border-right: none; }
+  .data-table td.computed {
+    font-family: var(--font-mono); font-size: 0.8rem;
+    color: var(--text-dim); padding: 0.55rem 0.7rem;
+    background: rgba(0, 0, 0, 0.12); text-align: right; white-space: nowrap;
+  }
+  .data-table td.computed.emphasis { color: var(--gold); font-weight: 500; }
+  .data-table td.computed.positive { color: var(--green); }
+  .data-table td.computed.negative { color: var(--red); }
+  .data-table td.status { padding: 0.55rem 0.7rem; }
+  .status-pill {
+    display: inline-block; padding: 0.15rem 0.55rem;
+    border-radius: 100px; font-size: 0.7rem; letter-spacing: 0.05em;
+    border: 1px solid;
+  }
+  .status-held { color: var(--blue); border-color: rgba(107, 168, 210, 0.3); background: rgba(107, 168, 210, 0.08); }
+  .status-opened { color: var(--gold); border-color: rgba(212, 160, 76, 0.3); background: rgba(212, 160, 76, 0.08); }
+  .status-sold { color: var(--text-muted); border-color: rgba(90, 90, 80, 0.3); background: rgba(90, 90, 80, 0.08); }
+
+  .cell-input, .cell-select {
+    width: 100%; background: transparent; border: none;
+    color: var(--text); font-family: inherit; font-size: inherit;
+    padding: 0.55rem 0.6rem; outline: none; transition: background 0.1s;
+  }
+  .cell-input:focus, .cell-select:focus {
+    background: rgba(212, 160, 76, 0.08);
+    box-shadow: inset 0 -1px 0 var(--gold);
+  }
+  .cell-input.num { font-family: var(--font-mono); text-align: right; }
+  .cell-input[type="date"] { font-family: var(--font-mono); font-size: 0.78rem; min-width: 120px; }
+  .cell-input.wide { min-width: 150px; }
+  .cell-input.narrow { min-width: 60px; }
+  .cell-input::placeholder { color: var(--text-muted); font-style: italic; }
+  .cell-select { appearance: none; padding-right: 1.5rem; min-width: 90px;
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+                      linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+    background-position: calc(100% - 10px) 50%, calc(100% - 6px) 50%;
+    background-size: 4px 4px; background-repeat: no-repeat;
+  }
+  .cell-select option { background: var(--surface); color: var(--text); }
+
+  .row-del { color: var(--text-muted); background: none; border: none; cursor: pointer; padding: 0.5rem 0.7rem; }
+  .row-del:hover { color: var(--red); }
+
+  .empty-state {
+    padding: 3rem 2rem; text-align: center; color: var(--text-dim);
+    font-style: italic; font-family: var(--font-display); font-size: 1rem;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+
+  .mobile-cards { display: none; }
+  .mobile-card {
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 0.85rem; margin-bottom: 0.6rem;
+  }
+  .mobile-card-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 0.5rem; gap: 0.5rem;
+  }
+  .mobile-card-title { font-weight: 500; color: var(--text); font-size: 0.92rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-card-meta { font-size: 0.72rem; color: var(--text-dim); font-family: var(--font-mono); }
+  .mobile-card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 0.8rem; font-size: 0.8rem; }
+  .mobile-card-field { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+  .mobile-card-field.full { grid-column: 1 / -1; }
+  .mobile-card-field label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .mobile-card-field input, .mobile-card-field select {
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 0.4rem 0.55rem;
+    font-family: inherit; font-size: 0.85rem;
+    border-radius: 4px; min-width: 0; width: 100%;
+  }
+  .mobile-card-field input.num { font-family: var(--font-mono); text-align: right; }
+  .mobile-card-field .computed-val {
+    font-family: var(--font-mono); padding: 0.4rem 0.55rem;
+    background: rgba(0, 0, 0, 0.2); border-radius: 4px; text-align: right;
+    color: var(--text-dim);
+  }
+  .mobile-card-field .computed-val.emphasis { color: var(--gold); font-weight: 500; }
+  .mobile-card-field .computed-val.positive { color: var(--green); }
+  .mobile-card-field .computed-val.negative { color: var(--red); }
+  .mobile-card-actions {
+    display: flex; justify-content: flex-end; gap: 0.5rem;
+    margin-top: 0.6rem; padding-top: 0.5rem;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  footer {
+    margin-top: 3rem; padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.75rem; color: var(--text-muted);
+    text-align: center; line-height: 1.8;
+  }
+  footer .notice { color: var(--gold-dim); font-family: var(--font-display); font-style: italic; font-size: 0.85rem; }
+
+  .toast {
+    position: fixed; bottom: 1.5rem; right: 1.5rem;
+    background: var(--surface); border: 1px solid var(--gold-dim);
+    padding: 0.8rem 1.2rem; color: var(--text); font-size: 0.85rem;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none; z-index: 100; max-width: 360px;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.error { border-color: var(--red); }
+
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: none; align-items: center; justify-content: center;
+    z-index: 200; padding: 1rem; overflow-y: auto;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--gold-dim);
+    padding: 1.5rem; max-width: 540px; width: 100%;
+    max-height: 90vh; overflow-y: auto;
+  }
+  .modal h3 { font-family: var(--font-display); color: var(--gold); font-size: 1.3rem; margin-bottom: 1rem; }
+  .modal-field { margin-bottom: 0.8rem; }
+  .modal-field label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 0.3rem; font-family: var(--font-display); }
+  .modal-field input, .modal-field select, .modal-field textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 0.5rem 0.7rem; font-family: inherit; font-size: 0.9rem;
+  }
+  .modal-field textarea { font-family: inherit; resize: vertical; }
+  .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; flex-wrap: wrap; }
+
+  .manage-list {
+    list-style: none; border: 1px solid var(--border);
+    background: var(--bg); max-height: 300px; overflow-y: auto;
+  }
+  .manage-list li {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--border-soft);
+    font-size: 0.88rem;
+  }
+  .manage-list li:last-child { border-bottom: none; }
+
+  .setup-screen {
+    max-width: 600px; margin: 4rem auto; padding: 2rem;
+    background: var(--surface); border: 1px solid var(--gold-dim);
+  }
+  .setup-screen h2 { font-family: var(--font-display); color: var(--gold); font-size: 1.6rem; margin-bottom: 1rem; }
+  .setup-screen p { color: var(--text-dim); font-size: 0.9rem; margin-bottom: 1rem; line-height: 1.8; }
+  .setup-screen textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 0.7rem; font-family: monospace; font-size: 0.78rem;
+    min-height: 200px; margin-bottom: 1rem;
+  }
+  .setup-screen code { background: var(--bg); padding: 0.15rem 0.4rem; border-radius: 3px; font-family: var(--font-mono); font-size: 0.85rem; color: var(--gold-dim); }
+
+  @media (max-width: 720px) {
+    .container { padding: 1rem 0.8rem; }
+    header.hero { flex-direction: column; align-items: flex-start; }
+    .hero-meta { text-align: left; }
+    nav.tabs { gap: 0.9rem; }
+    .tab { font-size: 0.95rem; }
+    .dashboard-grid { grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
+    .metric-card { padding: 0.7rem 0.8rem; }
+    .metric-label { font-size: 0.55rem; }
+    .metric-label-zh { font-size: 0.78rem; }
+    .metric-value { font-size: 0.95rem; }
+    .metric-sub { font-size: 0.62rem; }
+    .section-title { font-size: 1.4rem; }
+    .table-wrapper { display: none; }
+    .mobile-cards { display: block; }
+    .breakdown-table { font-size: 0.75rem; }
+    .breakdown-table th, .breakdown-table td { padding: 0.4rem 0.5rem; }
+  }
+</style>
+</head>
+<body>
+
+<div id="setup" class="setup-screen" style="display:none">
+  <h2>首次設定 Memi鋪</h2>
+  <p>
+    這個應用使用 <strong style="color:var(--gold)">Firebase</strong> 作為雲端資料庫，資料會即時在你和朋友之間同步。
+    請先按照教程建立一個免費的 Firebase 專案，然後把設定貼到下方。
+  </p>
+  <p style="font-size:0.82rem;color:var(--text-muted)">
+    設定會保存在你的瀏覽器（localStorage），不用每次輸入。朋友打開同一個網址也會用同一份設定。
+  </p>
+  <p>貼上你的 Firebase 設定（完整的 <code>firebaseConfig</code> JavaScript 物件）：</p>
+  <textarea id="config-input" placeholder='const firebaseConfig = {
+  apiKey: "AIza...",
+  authDomain: "your-project.firebaseapp.com",
+  databaseURL: "https://your-project-default-rtdb.firebaseio.com",
+  projectId: "your-project",
+  ...
+};'></textarea>
+  <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+    <button class="btn btn-primary" onclick="saveFirebaseConfig()">儲存並啟動</button>
+  </div>
+</div>
+
+<div id="app" class="container" style="display:none">
+  <header class="hero">
+    <div>
+      <h1 class="hero-title">Memi鋪</h1>
+      <p class="hero-subtitle">— 卡牌庫存・損益帳 —</p>
+    </div>
+    <div class="hero-meta">
+      <span class="hero-meta-tag">FIREBASE SYNC</span>
+      <div class="sync-indicator">
+        <span class="sync-dot" id="sync-dot"></span>
+        <span id="sync-text">讀取中…</span>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="dashboard">儀表板</button>
+    <button class="tab" data-tab="purchases">買入 <span class="tab-count" id="count-purchases">0</span></button>
+    <button class="tab" data-tab="boxes">盒 <span class="tab-count" id="count-boxes">0</span></button>
+    <button class="tab" data-tab="packets">卡包 <span class="tab-count" id="count-packets">0</span></button>
+    <button class="tab" data-tab="cards">單卡 <span class="tab-count" id="count-cards">0</span></button>
+    <button class="tab" data-tab="openings">開箱 <span class="tab-count" id="count-openings">0</span></button>
+    <button class="tab" data-tab="sales">銷售 <span class="tab-count" id="count-sales">0</span></button>
+    <button class="tab" data-tab="settings">設定</button>
+  </nav>
+
+  <section id="dashboard" class="section active">
+    <div class="dashboard-grid" id="dashboard-grid"></div>
+    <div class="btn-row" style="margin-bottom: 1rem;">
+      <button class="btn" onclick="exportJSON()">匯出 JSON 備份</button>
+      <button class="btn" onclick="showImportModal()">從 JSON 匯入</button>
+      <button class="btn" onclick="resetFirebaseConfig()" style="color:var(--red)">重設 Firebase</button>
+    </div>
+    <div class="breakdown-section">
+      <h3 class="breakdown-title">按商品分類 · 庫存現值與損益</h3>
+      <div id="breakdown-host"></div>
+    </div>
+  </section>
+
+  <section id="purchases" class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">買入記錄<span class="slug">/ 買 /</span></h2>
+        <p class="section-desc">買盒/卡包/單卡 → 自動建對應庫存</p>
+      </div>
+      <button class="btn btn-primary" onclick="addPurchase()">＋ 新增買入</button>
+    </div>
+    <div id="purchases-host"></div>
+  </section>
+
+  <section id="boxes" class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">盒庫存<span class="slug">/ 盒 /</span></h2>
+        <p class="section-desc">每個盒子一列</p>
+      </div>
+      <div class="btn-row">
+        <button class="btn" onclick="batchUpdatePrice('box')">批次更新現價</button>
+      </div>
+    </div>
+    <div id="boxes-host"></div>
+  </section>
+
+  <section id="packets" class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">卡包庫存<span class="slug">/ 卡包 /</span></h2>
+        <p class="section-desc">每包一列，可各自拆出不同的卡</p>
+      </div>
+      <div class="btn-row">
+        <button class="btn" onclick="batchUpdatePrice('packet')">批次更新現價</button>
+      </div>
+    </div>
+    <div id="packets-host"></div>
+  </section>
+
+  <section id="cards" class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">單卡庫存<span class="slug">/ 卡 /</span></h2>
+        <p class="section-desc">從買入、開箱產生，或手動新增</p>
+      </div>
+      <div class="btn-row">
+        <button class="btn" onclick="batchUpdateCardPrice()">批次更新現價</button>
+        <button class="btn btn-primary" onclick="addCardManually()">＋ 手動新增</button>
+      </div>
+    </div>
+    <div id="cards-host"></div>
+  </section>
+
+  <section id="openings" class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">開箱記錄<span class="slug">/ 開箱 /</span></h2>
+        <p class="section-desc">可分多次追加抽到的卡，成本會自動重算分攤</p>
+      </div>
+      <button class="btn btn-primary" onclick="showOpenBoxModal()">＋ 新增開箱</button>
+    </div>
+    <div id="openings-host"></div>
+  </section>
+
+  <section id="sales" class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">銷售記錄<span class="slug">/ 賣 /</span></h2>
+        <p class="section-desc">賣盒/卡包/單卡，對應庫存自動標記為「已賣」</p>
+      </div>
+      <button class="btn btn-primary" onclick="showSellModal()">＋ 新增銷售</button>
+    </div>
+    <div id="sales-host"></div>
+  </section>
+
+  <section id="settings" class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">設定<span class="slug">/ 設定 /</span></h2>
+        <p class="section-desc">管理類別、商品編號、購買來源</p>
+      </div>
+    </div>
+    <div id="settings-host"></div>
+  </section>
+
+  <footer>
+    <div class="notice">※ 資料儲存於你的 Firebase · 即時同步到所有使用者</div>
+    <div style="margin-top: 0.4rem;">金額以 HKD 換算彙總 · 匯率可於每列編輯</div>
+  </footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="modal-backdrop" id="modal-backdrop" onclick="if(event.target.id==='modal-backdrop')closeModal()">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getDatabase, ref, onValue, set } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
+
+window.firebaseImports = { initializeApp, getDatabase, ref, onValue, set };
+window.dispatchEvent(new Event('firebase-ready'));
+</script>
+
+<script>
+const DEFAULT_RATES = { HKD: 1, JPY: 0.05, MOP: 0.97, CNY: 0.88, USD: 7.8, TWD: 0.24 };
+const CURRENCIES = ['HKD', 'JPY', 'MOP', 'CNY', 'USD', 'TWD'];
+const BUY_TYPES = ['盒', '卡包', '單卡'];
+
+const state = {
+  purchases: [], boxes: [], packets: [], cards: [], openings: [], sales: [],
+  settings: {
+    categories: ['寶可夢', '海賊王', 'MTG', 'Union Arena', '遊戲王'],
+    products: ['M2', 'SV9a', 'SV8', 'CLK', 'ホワイトフレア', 'MEGAドリーム', 'ロケット団', 'ムニキス', 'スペシャルBOX', '散卡', '神の島の冒険'],
+    sources: ['Mercari', 'eBay', '煤炭', '聚龍軒', '直接店鋪', '朋友']
+  }
+};
+
+let db = null;
+let firebaseApp = null;
+let isApplyingRemote = false;
+const DATA_KEYS = ['purchases', 'boxes', 'packets', 'cards', 'openings', 'sales', 'settings'];
+
+function parseFirebaseConfig(text) {
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/^\s*(const|let|var)\s+\w+\s*=\s*/, '');
+  cleaned = cleaned.replace(/;?\s*$/, '');
+  cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z_$][\w$]*)\s*:/g, '$1"$2":');
+  cleaned = cleaned.replace(/'/g, '"');
+  return JSON.parse(cleaned);
+}
+
+function saveFirebaseConfig() {
+  const text = document.getElementById('config-input').value;
+  try {
+    const cfg = parseFirebaseConfig(text);
+    if (!cfg.databaseURL) {
+      alert('找不到 databaseURL，請確認你有建立 Realtime Database 並複製完整的設定');
+      return;
+    }
+    localStorage.setItem('memi_firebase_config', JSON.stringify(cfg));
+    location.reload();
+  } catch (e) {
+    alert('設定格式錯誤：' + e.message);
+  }
+}
+
+function resetFirebaseConfig() {
+  if (!confirm('確定要清除 Firebase 設定？雲端資料不會被刪除，下次輸入相同設定即可繼續使用。')) return;
+  localStorage.removeItem('memi_firebase_config');
+  location.reload();
+}
+
+function initFirebase(cfg) {
+  const { initializeApp, getDatabase, ref, onValue, set } = window.firebaseImports;
+  firebaseApp = initializeApp(cfg);
+  db = getDatabase(firebaseApp);
+
+  for (const key of DATA_KEYS) {
+    const r = ref(db, 'memi/' + key);
+    onValue(r, snapshot => {
+      const val = snapshot.val();
+      isApplyingRemote = true;
+      if (key === 'settings') {
+        if (val) state.settings = { ...state.settings, ...val };
+      } else {
+        state[key] = val || [];
+      }
+      isApplyingRemote = false;
+      refreshDataLists();
+      renderAll();
+      setSync('ok', '已同步 · ' + new Date().toLocaleTimeString('zh-HK'));
+    }, error => {
+      setSync('error', interpretError(error));
+      toast(interpretError(error), true);
+    });
+  }
+}
+
+function interpretError(e) {
+  if (!e) return '未知錯誤';
+  const msg = (e.message || String(e)).toLowerCase();
+  if (msg.includes('permission') || msg.includes('permission_denied'))
+    return 'Firebase 權限不足，請檢查規則設定是否開放讀寫';
+  if (msg.includes('network') || msg.includes('failed to fetch')) return '網路連線失敗';
+  if (msg.includes('quota')) return 'Firebase 額度已用完';
+  return '儲存失敗：' + (e.message || e);
+}
+
+async function saveKey(key, data) {
+  if (!db) return false;
+  if (isApplyingRemote) return true;
+  setSync('loading', '儲存中…');
+  try {
+    const { ref, set } = window.firebaseImports;
+    await set(ref(db, 'memi/' + key), data);
+    setSync('ok', '已儲存 · ' + new Date().toLocaleTimeString('zh-HK'));
+    return true;
+  } catch (e) {
+    const reason = interpretError(e);
+    setSync('error', reason);
+    toast(reason, true);
+    return false;
+  }
+}
+
+const saveTimers = {};
+function debouncedSave(key) {
+  if (saveTimers[key]) clearTimeout(saveTimers[key]);
+  saveTimers[key] = setTimeout(() => saveKey(key, state[key]), 500);
+}
+
+function setSync(status, text) {
+  const dot = document.getElementById('sync-dot');
+  const txt = document.getElementById('sync-text');
+  dot.className = 'sync-dot' + (status === 'loading' ? ' loading' : status === 'error' ? ' error' : '');
+  txt.textContent = text; txt.title = text;
+}
+function toast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), isError ? 5000 : 2500);
+}
+
+function uuid() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx'.replace(/[xy]/g, c => {
+    const r = Math.random()*16|0;
+    return (c==='x' ? r : (r&0x3|0x8)).toString(16);
+  });
+}
+function num(v, d = 0) { const n = parseFloat(v); return Number.isFinite(n) ? n : d; }
+function fmt(n) { if (!Number.isFinite(n)) return '—'; return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function escapeHTML(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+
+function costHKD(p) { return num(p.unit_price) * num(p.rate); }
+function boxStatus(b) { if (b.sold_sale_id) return 'sold'; if (b.opened_event_id) return 'opened'; return 'held'; }
+function packetStatus(p) { if (p.sold_sale_id) return 'sold'; if (p.opened_event_id) return 'opened'; return 'held'; }
+function cardStatus(c) { return c.sold_sale_id ? 'sold' : 'held'; }
+
+function computeTotals() {
+  let buyTotal = 0, saleTotal = 0;
+  let boxInvCost = 0, boxInvMarket = 0, boxInvCount = 0;
+  let packetInvCost = 0, packetInvMarket = 0, packetInvCount = 0;
+  let cardInvCost = 0, cardInvMarket = 0, cardInvCount = 0;
+  let realizedPL = 0;
+
+  for (const b of state.boxes) {
+    buyTotal += num(b.cost_hkd);
+    const st = boxStatus(b);
+    if (st === 'held') { boxInvCost += num(b.cost_hkd); boxInvMarket += num(b.market_price_hkd); boxInvCount++; }
+    else if (st === 'sold') { const s = state.sales.find(x => x.id === b.sold_sale_id); if (s) realizedPL += num(s.amount_hkd) - num(b.cost_hkd); }
+  }
+  for (const pk of state.packets) {
+    buyTotal += num(pk.cost_hkd);
+    const st = packetStatus(pk);
+    if (st === 'held') { packetInvCost += num(pk.cost_hkd); packetInvMarket += num(pk.market_price_hkd); packetInvCount++; }
+    else if (st === 'sold') { const s = state.sales.find(x => x.id === pk.sold_sale_id); if (s) realizedPL += num(s.amount_hkd) - num(pk.cost_hkd); }
+  }
+  for (const c of state.cards) {
+    if (!c.source_opening_id) buyTotal += num(c.cost_hkd);
+    const st = cardStatus(c);
+    if (st === 'held') { cardInvCost += num(c.cost_hkd); cardInvMarket += num(c.market_price_hkd); cardInvCount++; }
+    else if (st === 'sold') { const s = state.sales.find(x => x.id === c.sold_sale_id); if (s) realizedPL += num(s.amount_hkd) - num(c.cost_hkd); }
+  }
+  for (const s of state.sales) saleTotal += num(s.amount_hkd);
+
+  const invCost = boxInvCost + packetInvCost + cardInvCost;
+  const invMarket = boxInvMarket + packetInvMarket + cardInvMarket;
+  return {
+    buyTotal, saleTotal, realizedPL, unrealizedPL: invMarket - invCost,
+    totalPL: realizedPL + invMarket - invCost,
+    invCost, invMarket, invCount: boxInvCount + packetInvCount + cardInvCount,
+    boxInvCost, boxInvMarket, boxInvCount,
+    packetInvCost, packetInvMarket, packetInvCount,
+    cardInvCost, cardInvMarket, cardInvCount
+  };
+}
+
+function syncPurchaseToInventory(purchase) {
+  const targetCount = num(purchase.qty);
+  const perUnitCost = costHKD(purchase);
+
+  const removeHeldFrom = (arr, pid, statusFn) => {
+    const filtered = arr.filter(x => x.purchase_id === pid);
+    for (const x of filtered) if (statusFn(x) === 'held') { const i = arr.indexOf(x); if (i >= 0) arr.splice(i, 1); }
+  };
+
+  if (purchase.buy_type === '盒') {
+    removeHeldFrom(state.packets, purchase.id, packetStatus);
+    state.cards = state.cards.filter(c => !(c.source_purchase_id === purchase.id && !c.sold_sale_id));
+    const existingBoxes = state.boxes.filter(b => b.purchase_id === purchase.id);
+    const heldBoxes = existingBoxes.filter(b => boxStatus(b) === 'held');
+    let currentCount = existingBoxes.length;
+    while (currentCount < targetCount) {
+      state.boxes.push({ id: uuid(), purchase_id: purchase.id, product: purchase.product || '', category: purchase.category || '', cost_hkd: perUnitCost, market_price_hkd: 0, opened_event_id: null, sold_sale_id: null, note: '' });
+      currentCount++;
+    }
+    while (currentCount > targetCount && heldBoxes.length > 0) {
+      const toRemove = heldBoxes.pop();
+      const i = state.boxes.indexOf(toRemove);
+      if (i >= 0) state.boxes.splice(i, 1);
+      currentCount--;
+    }
+    for (const b of state.boxes) {
+      if (b.purchase_id === purchase.id && boxStatus(b) === 'held') {
+        b.cost_hkd = perUnitCost; b.category = purchase.category || ''; b.product = purchase.product || '';
+      }
+    }
+  } else if (purchase.buy_type === '卡包') {
+    removeHeldFrom(state.boxes, purchase.id, boxStatus);
+    state.cards = state.cards.filter(c => !(c.source_purchase_id === purchase.id && !c.sold_sale_id));
+    const existingPackets = state.packets.filter(p => p.purchase_id === purchase.id);
+    const heldPackets = existingPackets.filter(p => packetStatus(p) === 'held');
+    let currentCount = existingPackets.length;
+    while (currentCount < targetCount) {
+      state.packets.push({ id: uuid(), purchase_id: purchase.id, product: purchase.product || '', category: purchase.category || '', cost_hkd: perUnitCost, market_price_hkd: 0, opened_event_id: null, sold_sale_id: null, note: '' });
+      currentCount++;
+    }
+    while (currentCount > targetCount && heldPackets.length > 0) {
+      const toRemove = heldPackets.pop();
+      const i = state.packets.indexOf(toRemove);
+      if (i >= 0) state.packets.splice(i, 1);
+      currentCount--;
+    }
+    for (const p of state.packets) {
+      if (p.purchase_id === purchase.id && packetStatus(p) === 'held') {
+        p.cost_hkd = perUnitCost; p.category = purchase.category || ''; p.product = purchase.product || '';
+      }
+    }
+  } else if (purchase.buy_type === '單卡') {
+    removeHeldFrom(state.boxes, purchase.id, boxStatus);
+    removeHeldFrom(state.packets, purchase.id, packetStatus);
+    const existingCards = state.cards.filter(c => c.source_purchase_id === purchase.id);
+    const heldCards = existingCards.filter(c => cardStatus(c) === 'held');
+    let currentCount = existingCards.length;
+    while (currentCount < targetCount) {
+      state.cards.push({ id: uuid(), source_purchase_id: purchase.id, source_opening_id: null, card_name: '', box_code: purchase.product || '', card_number: '', category: purchase.category || '', cost_hkd: perUnitCost, market_price_hkd: 0, sold_sale_id: null, note: purchase.note || '' });
+      currentCount++;
+    }
+    while (currentCount > targetCount && heldCards.length > 0) {
+      const toRemove = heldCards.pop();
+      const i = state.cards.indexOf(toRemove);
+      if (i >= 0) state.cards.splice(i, 1);
+      currentCount--;
+    }
+    for (const c of state.cards) {
+      if (c.source_purchase_id === purchase.id && cardStatus(c) === 'held') {
+        c.cost_hkd = perUnitCost; c.category = purchase.category || ''; c.box_code = purchase.product || '';
+      }
+    }
+  }
+}
+
+function recalcOpeningCostAllocation(containerType, containerId) {
+  const arr = containerType === 'box' ? state.boxes : state.packets;
+  const container = arr.find(x => x.id === containerId);
+  if (!container || !container.opened_event_id) return;
+  const cards = state.cards.filter(c => c.source_opening_id === container.opened_event_id);
+  if (cards.length === 0) return;
+  const per = num(container.cost_hkd) / cards.length;
+  for (const c of cards) if (!c.sold_sale_id) c.cost_hkd = per;
+}
+
+function renderDashboard() {
+  const t = computeTotals();
+  const cards = [
+    { en: 'INVENTORY VALUE', zh: '庫存現值', value: t.invMarket, sub: `成本 ${fmt(t.invCost)} · ${t.invCount} 項` },
+    { en: 'UNREALIZED P&L', zh: '帳面盈虧', value: t.unrealizedPL, signed: true, sub: '現價 − 成本' },
+    { en: 'REALIZED P&L', zh: '已實現盈虧', value: t.realizedPL, signed: true, sub: '已售項目' },
+    { en: 'TOTAL P&L', zh: '總盈虧', value: t.totalPL, signed: true, highlight: true, sub: '帳面 + 已實現' },
+    { en: 'BUY TOTAL', zh: '累計買入', value: t.buyTotal },
+    { en: 'SALE TOTAL', zh: '累計售出', value: t.saleTotal },
+    { en: 'BOX', zh: '盒', value: t.boxInvMarket, sub: `${t.boxInvCount} 盒 · ${fmt(t.boxInvCost)}` },
+    { en: 'PACKET', zh: '卡包', value: t.packetInvMarket, sub: `${t.packetInvCount} 包 · ${fmt(t.packetInvCost)}` },
+    { en: 'CARD', zh: '單卡', value: t.cardInvMarket, sub: `${t.cardInvCount} 張 · ${fmt(t.cardInvCost)}` }
+  ];
+  document.getElementById('dashboard-grid').innerHTML = cards.map(c => {
+    const cls = c.signed ? (c.value >= 0 ? 'positive' : 'negative') : '';
+    const sign = c.signed && c.value >= 0 ? '+' : '';
+    return `<div class="metric-card ${c.highlight ? 'highlight' : ''}">
+      <div class="metric-label">${c.en}</div>
+      <div class="metric-label-zh">${c.zh}</div>
+      <div class="metric-value ${cls}">${sign}${fmt(c.value)}<span class="metric-unit">HKD</span></div>
+      ${c.sub ? `<div class="metric-sub">${c.sub}</div>` : ''}
+    </div>`;
+  }).join('');
+  renderBreakdown();
+}
+
+function renderBreakdown() {
+  const host = document.getElementById('breakdown-host');
+  const groups = {};
+  const push = (k, type, cost, market) => {
+    if (!groups[k]) groups[k] = { box: 0, packet: 0, card: 0, cost: 0, market: 0 };
+    groups[k][type]++; groups[k].cost += num(cost); groups[k].market += num(market);
+  };
+  for (const b of state.boxes) if (boxStatus(b) === 'held') push(b.product || '(未命名)', 'box', b.cost_hkd, b.market_price_hkd);
+  for (const p of state.packets) if (packetStatus(p) === 'held') push(p.product || '(未命名)', 'packet', p.cost_hkd, p.market_price_hkd);
+  for (const c of state.cards) if (cardStatus(c) === 'held') push(c.card_name || c.box_code || '(未命名)', 'card', c.cost_hkd, c.market_price_hkd);
+  const rows = Object.entries(groups).sort((a, b) => b[1].market - a[1].market);
+  if (rows.length === 0) { host.innerHTML = '<div class="empty-state">尚無庫存</div>'; return; }
+  let html = '<div style="overflow-x:auto"><table class="breakdown-table"><thead><tr><th>商品</th><th style="text-align:right">盒</th><th style="text-align:right">包</th><th style="text-align:right">張</th><th style="text-align:right">成本</th><th style="text-align:right">現值</th><th style="text-align:right">盈虧</th></tr></thead><tbody>';
+  for (const [name, g] of rows) {
+    const pl = g.market - g.cost;
+    const plCls = pl >= 0 ? 'positive' : 'negative';
+    const plSign = pl >= 0 ? '+' : '';
+    html += `<tr><td>${escapeHTML(name)}</td><td class="num">${g.box || '—'}</td><td class="num">${g.packet || '—'}</td><td class="num">${g.card || '—'}</td><td class="num">${fmt(g.cost)}</td><td class="num">${fmt(g.market)}</td><td class="num ${plCls}">${plSign}${fmt(pl)}</td></tr>`;
+  }
+  html += '</tbody></table></div>';
+  host.innerHTML = html;
+}
+
+function renderPurchases() {
+  document.getElementById('count-purchases').textContent = state.purchases.length;
+  const host = document.getElementById('purchases-host');
+  if (state.purchases.length === 0) { host.innerHTML = '<div class="empty-state">尚未有記錄 · 點擊「＋ 新增買入」開始</div>'; return; }
+  let rows = '', mobile = '';
+  for (const p of state.purchases) {
+    const unitHKD = num(p.unit_price) * num(p.rate);
+    const totalHKD = unitHKD * num(p.qty);
+    rows += `<tr data-id="${p.id}" data-kind="purchase">
+      <td>${inCell('date', p.date, '', '', 'date')}</td>
+      <td>${datalistCell('category', p.category, 'category-list', '', '類別')}</td>
+      <td>${datalistCell('product', p.product, 'product-list', 'wide', '編號')}</td>
+      <td>${selCell('buy_type', p.buy_type, BUY_TYPES)}</td>
+      <td>${curCell(p.currency)}</td>
+      <td>${numCellHTML('rate', p.rate, 4)}</td>
+      <td>${numCellHTML('unit_price', p.unit_price, 2)}</td>
+      <td>${numCellHTML('qty', p.qty, 0)}</td>
+      <td class="computed">${fmt(unitHKD)}</td>
+      <td class="computed emphasis">${fmt(totalHKD)}</td>
+      <td>${datalistCell('source', p.source, 'source-list', '', '來源')}</td>
+      <td>${inCell('note', p.note, '', '備註')}</td>
+      <td><button class="row-del" onclick="deletePurchase('${p.id}')">✕</button></td>
+    </tr>`;
+    mobile += `<div class="mobile-card" data-id="${p.id}" data-kind="purchase">
+      <div class="mobile-card-header">
+        <div class="mobile-card-title">${escapeHTML(p.product || '(未命名)')} <span style="color:var(--text-dim);font-weight:normal">×${p.qty || 0}</span></div>
+        <div class="mobile-card-meta">HKD ${fmt(totalHKD)}</div>
+      </div>
+      <div class="mobile-card-grid">
+        <div class="mobile-card-field"><label>日期</label>${inCell('date', p.date, '', '', 'date')}</div>
+        <div class="mobile-card-field"><label>類別</label>${datalistCell('category', p.category, 'category-list', '', '類別')}</div>
+        <div class="mobile-card-field"><label>商品編號</label>${datalistCell('product', p.product, 'product-list', '', '編號')}</div>
+        <div class="mobile-card-field"><label>類型</label>${selCell('buy_type', p.buy_type, BUY_TYPES)}</div>
+        <div class="mobile-card-field"><label>貨幣</label>${curCell(p.currency)}</div>
+        <div class="mobile-card-field"><label>當時匯率</label>${numCellHTML('rate', p.rate, 4)}</div>
+        <div class="mobile-card-field"><label>單價（當地）</label>${numCellHTML('unit_price', p.unit_price, 2)}</div>
+        <div class="mobile-card-field"><label>數量</label>${numCellHTML('qty', p.qty, 0)}</div>
+        <div class="mobile-card-field"><label>單價 HKD</label><div class="computed-val">${fmt(unitHKD)}</div></div>
+        <div class="mobile-card-field"><label>小計 HKD</label><div class="computed-val emphasis">${fmt(totalHKD)}</div></div>
+        <div class="mobile-card-field full"><label>購買來源</label>${datalistCell('source', p.source, 'source-list', '', '來源')}</div>
+        <div class="mobile-card-field full"><label>備註</label>${inCell('note', p.note, '', '例如 PSA10')}</div>
+      </div>
+      <div class="mobile-card-actions"><button class="btn" onclick="deletePurchase('${p.id}')" style="font-size:0.75rem">刪除</button></div>
+    </div>`;
+  }
+  host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
+    <th>日期</th><th>類別</th><th>商品編號</th><th>類型</th><th>貨幣</th><th>匯率</th><th>單價</th><th>數量</th>
+    <th>單價 HKD</th><th>小計 HKD</th><th>來源</th><th>備註</th><th></th>
+  </tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="mobile-cards">${mobile}</div>`;
+}
+
+function renderBoxes() {
+  document.getElementById('count-boxes').textContent = state.boxes.length;
+  const host = document.getElementById('boxes-host');
+  if (state.boxes.length === 0) { host.innerHTML = '<div class="empty-state">尚無盒庫存</div>'; return; }
+  renderContainerInventory(host, state.boxes, 'box', boxStatus);
+}
+function renderPackets() {
+  document.getElementById('count-packets').textContent = state.packets.length;
+  const host = document.getElementById('packets-host');
+  if (state.packets.length === 0) { host.innerHTML = '<div class="empty-state">尚無卡包庫存</div>'; return; }
+  renderContainerInventory(host, state.packets, 'packet', packetStatus);
+}
+
+function renderContainerInventory(host, items, kind, statusFn) {
+  let rows = '', mobile = '';
+  for (const item of items) {
+    const st = statusFn(item);
+    const pl = num(item.market_price_hkd) - num(item.cost_hkd);
+    const plCls = st === 'held' ? (pl >= 0 ? 'positive' : 'negative') : '';
+    const plSign = pl >= 0 ? '+' : '';
+    const stLabel = st === 'held' ? '持有' : st === 'opened' ? '已拆' : '已賣';
+    rows += `<tr data-id="${item.id}" data-kind="${kind}">
+      <td class="status"><span class="status-pill status-${st}">${stLabel}</span></td>
+      <td>${inCell('product', item.product, 'wide', '商品編號')}</td>
+      <td>${inCell('category', item.category, '', '類別')}</td>
+      <td class="computed">${fmt(item.cost_hkd)}</td>
+      <td>${st === 'held' ? numCellHTML('market_price_hkd', item.market_price_hkd, 2) : '<span class="computed" style="display:block">—</span>'}</td>
+      <td class="computed ${plCls}">${st === 'held' ? plSign + fmt(pl) : '—'}</td>
+      <td>${inCell('note', item.note, 'wide', '備註')}</td>
+    </tr>`;
+    mobile += `<div class="mobile-card" data-id="${item.id}" data-kind="${kind}">
+      <div class="mobile-card-header">
+        <div class="mobile-card-title">${escapeHTML(item.product || '(未命名)')}</div>
+        <span class="status-pill status-${st}">${stLabel}</span>
+      </div>
+      <div class="mobile-card-grid">
+        <div class="mobile-card-field"><label>類別</label>${inCell('category', item.category, '', '類別')}</div>
+        <div class="mobile-card-field"><label>成本 HKD</label><div class="computed-val">${fmt(item.cost_hkd)}</div></div>
+        ${st === 'held' ? `
+          <div class="mobile-card-field"><label>現價 HKD</label>${numCellHTML('market_price_hkd', item.market_price_hkd, 2)}</div>
+          <div class="mobile-card-field"><label>帳面盈虧</label><div class="computed-val ${pl>=0?'positive':'negative'}">${plSign}${fmt(pl)}</div></div>
+        ` : `<div class="mobile-card-field full"><label>狀態</label><div class="computed-val">${stLabel}</div></div>`}
+        <div class="mobile-card-field full"><label>備註</label>${inCell('note', item.note, '', '備註')}</div>
+      </div>
+    </div>`;
+  }
+  host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
+    <th>狀態</th><th>商品編號</th><th>類別</th><th>成本 HKD</th><th>現價 HKD</th><th>帳面盈虧</th><th>備註</th>
+  </tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="mobile-cards">${mobile}</div>`;
+}
+
+function renderCards() {
+  document.getElementById('count-cards').textContent = state.cards.length;
+  const host = document.getElementById('cards-host');
+  if (state.cards.length === 0) { host.innerHTML = '<div class="empty-state">尚無單卡庫存</div>'; return; }
+  let rows = '', mobile = '';
+  for (const c of state.cards) {
+    const st = cardStatus(c);
+    const pl = num(c.market_price_hkd) - num(c.cost_hkd);
+    const plCls = st === 'held' ? (pl >= 0 ? 'positive' : 'negative') : '';
+    const plSign = pl >= 0 ? '+' : '';
+    const stLabel = st === 'held' ? '持有' : '已賣';
+    const src = c.source_purchase_id ? '買入' : c.source_opening_id ? '開箱' : '手動';
+    rows += `<tr data-id="${c.id}" data-kind="card">
+      <td class="status"><span class="status-pill status-${st}">${stLabel}</span></td>
+      <td>${inCell('box_code', c.box_code, 'narrow', '盒編號')}</td>
+      <td>${inCell('card_number', c.card_number, 'narrow', '卡編號')}</td>
+      <td>${inCell('card_name', c.card_name, 'wide', '卡名')}</td>
+      <td>${inCell('category', c.category, '', '類別')}</td>
+      <td class="computed" style="font-size:0.72rem;text-align:center">${src}</td>
+      <td>${numCellHTML('cost_hkd', c.cost_hkd, 2)}</td>
+      <td>${st === 'held' ? numCellHTML('market_price_hkd', c.market_price_hkd, 2) : '<span class="computed" style="display:block">—</span>'}</td>
+      <td class="computed ${plCls}">${st === 'held' ? plSign + fmt(pl) : '—'}</td>
+      <td>${inCell('note', c.note, 'wide', '備註')}</td>
+      <td>${c.source_purchase_id || c.source_opening_id ? '' : `<button class="row-del" onclick="deleteCard('${c.id}')">✕</button>`}</td>
+    </tr>`;
+    mobile += `<div class="mobile-card" data-id="${c.id}" data-kind="card">
+      <div class="mobile-card-header">
+        <div class="mobile-card-title">${escapeHTML(c.card_name || '(未命名)')} ${c.card_number ? '<span style="color:var(--text-dim);font-weight:normal">' + escapeHTML(c.card_number) + '</span>' : ''}</div>
+        <span class="status-pill status-${st}">${stLabel}</span>
+      </div>
+      <div class="mobile-card-grid">
+        <div class="mobile-card-field"><label>盒編號</label>${inCell('box_code', c.box_code, '', '盒編號')}</div>
+        <div class="mobile-card-field"><label>卡編號</label>${inCell('card_number', c.card_number, '', '卡編號')}</div>
+        <div class="mobile-card-field full"><label>卡名</label>${inCell('card_name', c.card_name, '', '卡名')}</div>
+        <div class="mobile-card-field"><label>類別</label>${inCell('category', c.category, '', '類別')}</div>
+        <div class="mobile-card-field"><label>來源</label><div class="computed-val">${src}</div></div>
+        <div class="mobile-card-field"><label>成本 HKD</label>${numCellHTML('cost_hkd', c.cost_hkd, 2)}</div>
+        ${st === 'held' ? `
+          <div class="mobile-card-field"><label>現價 HKD</label>${numCellHTML('market_price_hkd', c.market_price_hkd, 2)}</div>
+          <div class="mobile-card-field full"><label>帳面盈虧</label><div class="computed-val ${pl>=0?'positive':'negative'}">${plSign}${fmt(pl)}</div></div>
+        ` : `<div class="mobile-card-field full"><label>狀態</label><div class="computed-val">已賣</div></div>`}
+        <div class="mobile-card-field full"><label>備註</label>${inCell('note', c.note, '', '例如 PSA10')}</div>
+      </div>
+      ${c.source_purchase_id || c.source_opening_id ? '' : `<div class="mobile-card-actions"><button class="btn" onclick="deleteCard('${c.id}')" style="font-size:0.75rem">刪除</button></div>`}
+    </div>`;
+  }
+  host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
+    <th>狀態</th><th>盒編號</th><th>卡編號</th><th>卡名</th><th>類別</th>
+    <th>來源</th><th>成本 HKD</th><th>現價 HKD</th><th>帳面盈虧</th><th>備註</th><th></th>
+  </tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="mobile-cards">${mobile}</div>`;
+}
+
+function renderOpenings() {
+  document.getElementById('count-openings').textContent = state.openings.length;
+  const host = document.getElementById('openings-host');
+  if (state.openings.length === 0) { host.innerHTML = '<div class="empty-state">尚無開箱記錄</div>'; return; }
+  let rows = '', mobile = '';
+  for (const o of state.openings) {
+    const container = o.container_type === 'packet'
+      ? state.packets.find(p => p.id === o.container_id)
+      : state.boxes.find(b => b.id === o.container_id);
+    const cards = state.cards.filter(c => c.source_opening_id === o.id);
+    const containerLabel = container
+      ? `[${o.container_type === 'packet' ? '包' : '盒'}] ${container.product}`
+      : '(容器已刪除)';
+    const cardsLabel = cards.map(c => `${c.card_name || '(未命名)'}${c.card_number ? ' ' + c.card_number : ''}`).join(' · ') || '(未記錄)';
+    const per = cards.length > 0 && container ? num(container.cost_hkd) / cards.length : 0;
+    rows += `<tr>
+      <td style="padding:0.55rem 0.7rem">${escapeHTML(o.date)}</td>
+      <td style="padding:0.55rem 0.7rem">${escapeHTML(containerLabel)}</td>
+      <td class="computed">${fmt(container ? container.cost_hkd : 0)}</td>
+      <td style="padding:0.55rem 0.7rem;text-align:center">${cards.length}</td>
+      <td class="computed">${cards.length ? fmt(per) : '—'}</td>
+      <td style="padding:0.55rem 0.7rem">${escapeHTML(cardsLabel)}</td>
+      <td>
+        <button class="btn" onclick="showAddCardsToOpeningModal('${o.id}')" style="font-size:0.72rem;padding:0.3rem 0.55rem">＋ 追加卡</button>
+        <button class="row-del" onclick="deleteOpening('${o.id}')">✕</button>
+      </td>
+    </tr>`;
+    mobile += `<div class="mobile-card">
+      <div class="mobile-card-header">
+        <div class="mobile-card-title">${escapeHTML(containerLabel)}</div>
+        <div class="mobile-card-meta">${escapeHTML(o.date)}</div>
+      </div>
+      <div class="mobile-card-grid">
+        <div class="mobile-card-field"><label>盒成本 HKD</label><div class="computed-val">${fmt(container ? container.cost_hkd : 0)}</div></div>
+        <div class="mobile-card-field"><label>已抽張數</label><div class="computed-val">${cards.length}</div></div>
+        <div class="mobile-card-field full"><label>每張分攤 HKD</label><div class="computed-val">${cards.length ? fmt(per) : '—'}</div></div>
+        <div class="mobile-card-field full"><label>抽到的卡</label><div class="computed-val" style="text-align:left;font-family:inherit;font-size:0.78rem">${escapeHTML(cardsLabel)}</div></div>
+      </div>
+      <div class="mobile-card-actions">
+        <button class="btn" onclick="showAddCardsToOpeningModal('${o.id}')" style="font-size:0.75rem">＋ 追加卡</button>
+        <button class="btn" onclick="deleteOpening('${o.id}')" style="font-size:0.75rem">刪除</button>
+      </div>
+    </div>`;
+  }
+  host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
+    <th>開箱日</th><th>來源</th><th>成本 HKD</th><th>已抽</th><th>每張分攤</th><th>抽到的卡</th><th></th>
+  </tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="mobile-cards">${mobile}</div>`;
+}
+
+function renderSales() {
+  document.getElementById('count-sales').textContent = state.sales.length;
+  const host = document.getElementById('sales-host');
+  if (state.sales.length === 0) { host.innerHTML = '<div class="empty-state">尚無銷售記錄</div>'; return; }
+  let rows = '', mobile = '';
+  for (const s of state.sales) {
+    let itemLabel = '', cost = 0;
+    if (s.item_type === 'box') { const b = state.boxes.find(x => x.id === s.item_id); itemLabel = b ? `[盒] ${b.product}` : '[盒] (已刪除)'; cost = b ? num(b.cost_hkd) : 0; }
+    else if (s.item_type === 'packet') { const p = state.packets.find(x => x.id === s.item_id); itemLabel = p ? `[包] ${p.product}` : '[包] (已刪除)'; cost = p ? num(p.cost_hkd) : 0; }
+    else if (s.item_type === 'card') { const c = state.cards.find(x => x.id === s.item_id); itemLabel = c ? `[卡] ${c.card_name}${c.card_number ? ' ' + c.card_number : ''}` : '[卡] (已刪除)'; cost = c ? num(c.cost_hkd) : 0; }
+    const pl = num(s.amount_hkd) - cost;
+    const plCls = pl >= 0 ? 'positive' : 'negative';
+    const plSign = pl >= 0 ? '+' : '';
+    rows += `<tr>
+      <td style="padding:0.55rem 0.7rem">${escapeHTML(s.date)}</td>
+      <td style="padding:0.55rem 0.7rem">${escapeHTML(itemLabel)}</td>
+      <td style="padding:0.55rem 0.7rem">${escapeHTML(s.currency)}</td>
+      <td class="computed">${fmt(s.rate)}</td>
+      <td class="computed">${fmt(s.amount_local)}</td>
+      <td class="computed emphasis">${fmt(s.amount_hkd)}</td>
+      <td class="computed">${fmt(cost)}</td>
+      <td class="computed ${plCls}">${plSign}${fmt(pl)}</td>
+      <td><button class="row-del" onclick="deleteSale('${s.id}')">✕</button></td>
+    </tr>`;
+    mobile += `<div class="mobile-card">
+      <div class="mobile-card-header">
+        <div class="mobile-card-title">${escapeHTML(itemLabel)}</div>
+        <div class="mobile-card-meta">${escapeHTML(s.date)}</div>
+      </div>
+      <div class="mobile-card-grid">
+        <div class="mobile-card-field"><label>貨幣</label><div class="computed-val">${escapeHTML(s.currency)}</div></div>
+        <div class="mobile-card-field"><label>當時匯率</label><div class="computed-val">${fmt(s.rate)}</div></div>
+        <div class="mobile-card-field"><label>金額（當地）</label><div class="computed-val">${fmt(s.amount_local)}</div></div>
+        <div class="mobile-card-field"><label>金額 HKD</label><div class="computed-val emphasis">${fmt(s.amount_hkd)}</div></div>
+        <div class="mobile-card-field"><label>成本 HKD</label><div class="computed-val">${fmt(cost)}</div></div>
+        <div class="mobile-card-field"><label>盈虧</label><div class="computed-val ${pl>=0?'positive':'negative'}">${plSign}${fmt(pl)}</div></div>
+      </div>
+      <div class="mobile-card-actions"><button class="btn" onclick="deleteSale('${s.id}')" style="font-size:0.75rem">刪除</button></div>
+    </div>`;
+  }
+  host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
+    <th>銷售日</th><th>項目</th><th>貨幣</th><th>匯率</th><th>金額（當地）</th><th>金額 HKD</th><th>成本 HKD</th><th>盈虧</th><th></th>
+  </tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="mobile-cards">${mobile}</div>`;
+}
+
+function renderSettings() {
+  const host = document.getElementById('settings-host');
+  const makeSection = (title, key) => {
+    const items = state.settings[key] || [];
+    const list = items.map((v, i) => `
+      <li><span>${escapeHTML(v)}</span><button class="row-del" onclick="removeSetting('${key}', ${i})">✕</button></li>`).join('');
+    return `<div style="margin-bottom:1.5rem">
+      <h3 style="font-family:var(--font-display);color:var(--text);font-size:1.1rem;margin-bottom:0.6rem">${title}</h3>
+      ${items.length ? `<ul class="manage-list">${list}</ul>` : '<div style="color:var(--text-dim);font-size:0.85rem;padding:0.5rem">尚無項目</div>'}
+      <div style="display:flex;gap:0.5rem;margin-top:0.6rem">
+        <input id="add-${key}" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.7rem;font-family:inherit;font-size:0.9rem" placeholder="新增${title}">
+        <button class="btn btn-primary" onclick="addSetting('${key}')">＋ 加入</button>
+      </div>
+    </div>`;
+  };
+  host.innerHTML = makeSection('類別', 'categories') +
+                   makeSection('商品編號', 'products') +
+                   makeSection('購買來源', 'sources');
+}
+
+function addSetting(key) {
+  const input = document.getElementById(`add-${key}`);
+  const val = input.value.trim();
+  if (!val) return;
+  if (!state.settings[key]) state.settings[key] = [];
+  if (!state.settings[key].includes(val)) {
+    state.settings[key].push(val);
+    saveKey('settings', state.settings);
+    renderSettings();
+    refreshDataLists();
+    toast('已新增');
+  } else {
+    toast('已存在', true);
+  }
+  input.value = '';
+}
+function removeSetting(key, idx) {
+  if (!confirm(`確定移除「${state.settings[key][idx]}」？`)) return;
+  state.settings[key].splice(idx, 1);
+  saveKey('settings', state.settings);
+  renderSettings();
+  refreshDataLists();
+}
+
+function refreshDataLists() {
+  document.querySelectorAll('datalist').forEach(d => d.remove());
+  const make = (id, items) => {
+    const dl = document.createElement('datalist');
+    dl.id = id;
+    dl.innerHTML = (items || []).map(c => `<option value="${escapeHTML(c)}">`).join('');
+    document.body.appendChild(dl);
+  };
+  make('category-list', state.settings.categories);
+  make('product-list', state.settings.products);
+  make('source-list', state.settings.sources);
+}
+
+function inCell(field, val, size='', ph='', type='text') {
+  return `<input class="cell-input ${size}" type="${type}" data-field="${field}" value="${escapeHTML(val)}" placeholder="${escapeHTML(ph)}">`;
+}
+function numCellHTML(field, val, dec=2) {
+  const step = dec === 0 ? '1' : dec === 4 ? '0.0001' : '0.01';
+  const v = (val === undefined || val === null || val === '') ? '' : val;
+  return `<input class="cell-input num" type="number" step="${step}" data-field="${field}" value="${v}">`;
+}
+function datalistCell(field, val, listId, size='', ph='') {
+  return `<input class="cell-input ${size}" list="${listId}" data-field="${field}" value="${escapeHTML(val)}" placeholder="${escapeHTML(ph)}">`;
+}
+function selCell(field, val, opts) {
+  const html = opts.map(o => `<option ${o === val ? 'selected' : ''} value="${escapeHTML(o)}">${escapeHTML(o)}</option>`).join('');
+  return `<select class="cell-select" data-field="${field}"><option value=""></option>${html}</select>`;
+}
+function curCell(val) {
+  const html = CURRENCIES.map(c => `<option ${c === val ? 'selected' : ''} value="${c}">${c}</option>`).join('');
+  return `<select class="cell-select" data-field="currency">${html}</select>`;
+}
+
+document.addEventListener('change', (e) => {
+  const el = e.target;
+  const field = el.dataset?.field;
+  if (!field) return;
+  const parent = el.closest('[data-kind][data-id]');
+  if (!parent) return;
+  handleEdit(parent.dataset.kind, parent.dataset.id, field, el);
+});
+
+function handleEdit(kind, id, field, el) {
+  let value = el.value;
+  if (el.type === 'number') value = num(value);
+
+  if (kind === 'purchase') {
+    const p = state.purchases.find(x => x.id === id);
+    if (!p) return;
+    p[field] = value;
+    if (field === 'currency' && DEFAULT_RATES[value] !== undefined) {
+      p.rate = DEFAULT_RATES[value];
+      document.querySelectorAll(`[data-kind="purchase"][data-id="${id}"] input[data-field="rate"]`).forEach(i => i.value = p.rate);
+    }
+    syncPurchaseToInventory(p);
+    debouncedSave('purchases'); debouncedSave('boxes'); debouncedSave('packets'); debouncedSave('cards');
+    renderAll();
+  } else if (kind === 'box' || kind === 'packet') {
+    const arr = kind === 'box' ? state.boxes : state.packets;
+    const item = arr.find(x => x.id === id);
+    if (!item) return;
+    item[field] = value;
+    debouncedSave(kind === 'box' ? 'boxes' : 'packets');
+    renderDashboard();
+    if (field === 'market_price_hkd') { if (kind === 'box') renderBoxes(); else renderPackets(); }
+  } else if (kind === 'card') {
+    const c = state.cards.find(x => x.id === id);
+    if (!c) return;
+    c[field] = value;
+    debouncedSave('cards');
+    renderDashboard();
+    if (field === 'market_price_hkd' || field === 'cost_hkd') renderCards();
+  }
+}
+
+function renderAll() {
+  renderPurchases(); renderBoxes(); renderPackets(); renderCards();
+  renderOpenings(); renderSales(); renderDashboard(); renderSettings();
+}
+
+function addPurchase() {
+  const p = {
+    id: uuid(), date: todayISO(),
+    category: (state.settings.categories || [])[0] || '',
+    product: '', buy_type: '盒', currency: 'JPY', rate: DEFAULT_RATES.JPY,
+    unit_price: 0, qty: 1, source: '', note: ''
+  };
+  state.purchases.push(p);
+  syncPurchaseToInventory(p);
+  saveKey('purchases', state.purchases);
+  saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
+  renderAll();
+  const rows = document.querySelectorAll('[data-kind="purchase"]');
+  const last = rows[rows.length - 1];
+  last?.querySelector('input[data-field="product"]')?.focus();
+}
+
+function deletePurchase(id) {
+  const rB = state.boxes.filter(b => b.purchase_id === id);
+  const rP = state.packets.filter(p => p.purchase_id === id);
+  const rC = state.cards.filter(c => c.source_purchase_id === id);
+  if (rB.some(b => boxStatus(b) !== 'held') || rP.some(p => packetStatus(p) !== 'held') || rC.some(c => cardStatus(c) !== 'held')) {
+    toast('無法刪除：此批已有開箱或銷售', true); return;
+  }
+  if (!confirm(`確定刪除？將移除 ${rB.length} 盒 / ${rP.length} 包 / ${rC.length} 張`)) return;
+  state.boxes = state.boxes.filter(b => b.purchase_id !== id);
+  state.packets = state.packets.filter(p => p.purchase_id !== id);
+  state.cards = state.cards.filter(c => c.source_purchase_id !== id);
+  state.purchases = state.purchases.filter(x => x.id !== id);
+  saveKey('purchases', state.purchases); saveKey('boxes', state.boxes);
+  saveKey('packets', state.packets); saveKey('cards', state.cards);
+  renderAll();
+}
+
+function deleteCard(id) {
+  const c = state.cards.find(x => x.id === id);
+  if (!c) return;
+  if (c.sold_sale_id) { toast('已售出不可刪', true); return; }
+  if (c.source_opening_id || c.source_purchase_id) { toast('請從來源刪除', true); return; }
+  if (!confirm('確定刪除？')) return;
+  state.cards = state.cards.filter(x => x.id !== id);
+  saveKey('cards', state.cards);
+  renderCards(); renderDashboard();
+}
+
+function addCardManually() {
+  state.cards.push({
+    id: uuid(), source_purchase_id: null, source_opening_id: null,
+    card_name: '', box_code: '', card_number: '',
+    category: (state.settings.categories || [])[0] || '',
+    cost_hkd: 0, market_price_hkd: 0, sold_sale_id: null, note: '手動新增'
+  });
+  saveKey('cards', state.cards);
+  renderCards(); renderDashboard();
+  const rows = document.querySelectorAll('[data-kind="card"]');
+  const last = rows[rows.length - 1];
+  last?.querySelector('input[data-field="card_name"]')?.focus();
+}
+
+function showOpenBoxModal() {
+  const heldBoxes = state.boxes.filter(b => boxStatus(b) === 'held');
+  const heldPackets = state.packets.filter(p => packetStatus(p) === 'held');
+  if (heldBoxes.length === 0 && heldPackets.length === 0) { toast('沒有可開的盒或卡包'); return; }
+  const boxOpts = heldBoxes.map(b => `<option value="box:${b.id}">[盒] ${escapeHTML(b.product)} (成本 ${fmt(b.cost_hkd)})</option>`).join('');
+  const packetOpts = heldPackets.map(p => `<option value="packet:${p.id}">[包] ${escapeHTML(p.product)} (成本 ${fmt(p.cost_hkd)})</option>`).join('');
+  document.getElementById('modal-content').innerHTML = `
+    <h3>新增開箱</h3>
+    <div class="modal-field"><label>日期</label><input type="date" id="op-date" value="${todayISO()}"></div>
+    <div class="modal-field"><label>選擇要開的</label><select id="op-container">${boxOpts}${packetOpts}</select></div>
+    <div class="modal-field"><label>抽到的好卡（每行一張，格式：卡名 卡編號）</label>
+      <textarea id="op-cards" rows="4" placeholder="例如：&#10;藍噴火龍 #106&#10;&#10;空白也 OK，之後可追加"></textarea>
+    </div>
+    <div class="modal-field" style="font-size:0.75rem;color:var(--text-dim)">成本會平均分攤到所有卡。追加時自動重算。</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmOpenBox()">確認</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('show');
+}
+
+function confirmOpenBox() {
+  const date = document.getElementById('op-date').value;
+  const [ct, cid] = document.getElementById('op-container').value.split(':');
+  const text = document.getElementById('op-cards').value.trim();
+  const container = ct === 'box' ? state.boxes.find(b => b.id === cid) : state.packets.find(p => p.id === cid);
+  if (!container) { toast('找不到容器', true); return; }
+  const lines = text ? text.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  const opening = { id: uuid(), date, container_type: ct, container_id: cid };
+  state.openings.push(opening);
+  for (const line of lines) {
+    let cardName = line, cardNumber = '';
+    const m = line.match(/^(.+?)\s+(\S+)$/);
+    if (m && (m[2].startsWith('#') || /\d/.test(m[2]))) { cardName = m[1].trim(); cardNumber = m[2]; }
+    state.cards.push({
+      id: uuid(), source_purchase_id: null, source_opening_id: opening.id,
+      card_name: cardName, box_code: container.product || '', card_number: cardNumber,
+      category: container.category || '', cost_hkd: 0, market_price_hkd: 0,
+      sold_sale_id: null, note: `開箱於 ${date}`
+    });
+  }
+  container.opened_event_id = opening.id;
+  recalcOpeningCostAllocation(ct, cid);
+  saveKey('openings', state.openings);
+  if (ct === 'box') saveKey('boxes', state.boxes); else saveKey('packets', state.packets);
+  saveKey('cards', state.cards);
+  closeModal();
+  renderAll();
+  toast(`已開箱，新增 ${lines.length} 張`);
+}
+
+function showAddCardsToOpeningModal(id) {
+  const o = state.openings.find(x => x.id === id);
+  if (!o) return;
+  const container = o.container_type === 'packet' ? state.packets.find(p => p.id === o.container_id) : state.boxes.find(b => b.id === o.container_id);
+  if (!container) { toast('容器不存在', true); return; }
+  const current = state.cards.filter(c => c.source_opening_id === id).length;
+  document.getElementById('modal-content').innerHTML = `
+    <h3>追加抽到的卡</h3>
+    <div class="modal-field" style="font-size:0.85rem;color:var(--text-dim)">
+      來源：${escapeHTML(container.product)}（成本 HKD ${fmt(container.cost_hkd)}）· 目前 ${current} 張
+    </div>
+    <div class="modal-field"><label>追加（每行一張）</label><textarea id="add-cards" rows="4" placeholder="卡名 #編號"></textarea></div>
+    <div class="modal-field" style="font-size:0.75rem;color:var(--text-dim)">追加後重新分攤成本。</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmAddCards('${id}')">確認</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('show');
+}
+
+function confirmAddCards(id) {
+  const o = state.openings.find(x => x.id === id);
+  if (!o) return;
+  const container = o.container_type === 'packet' ? state.packets.find(p => p.id === o.container_id) : state.boxes.find(b => b.id === o.container_id);
+  if (!container) return;
+  const text = document.getElementById('add-cards').value.trim();
+  if (!text) { toast('沒有輸入'); return; }
+  const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
+  for (const line of lines) {
+    let cardName = line, cardNumber = '';
+    const m = line.match(/^(.+?)\s+(\S+)$/);
+    if (m && (m[2].startsWith('#') || /\d/.test(m[2]))) { cardName = m[1].trim(); cardNumber = m[2]; }
+    state.cards.push({
+      id: uuid(), source_purchase_id: null, source_opening_id: id,
+      card_name: cardName, box_code: container.product || '', card_number: cardNumber,
+      category: container.category || '', cost_hkd: 0, market_price_hkd: 0,
+      sold_sale_id: null, note: `追加於 ${todayISO()}`
+    });
+  }
+  recalcOpeningCostAllocation(o.container_type, o.container_id);
+  saveKey('cards', state.cards);
+  closeModal();
+  renderAll();
+  toast(`已追加 ${lines.length} 張`);
+}
+
+function deleteOpening(id) {
+  const o = state.openings.find(x => x.id === id);
+  if (!o) return;
+  const cards = state.cards.filter(c => c.source_opening_id === id);
+  if (cards.some(c => c.sold_sale_id)) { toast('有已售卡不可刪', true); return; }
+  if (!confirm(`刪除？將移除 ${cards.length} 張`)) return;
+  state.cards = state.cards.filter(c => c.source_opening_id !== id);
+  const arr = o.container_type === 'packet' ? state.packets : state.boxes;
+  const c = arr.find(x => x.opened_event_id === id);
+  if (c) c.opened_event_id = null;
+  state.openings = state.openings.filter(x => x.id !== id);
+  saveKey('openings', state.openings);
+  saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
+  renderAll();
+}
+
+function showSellModal() {
+  const hB = state.boxes.filter(b => boxStatus(b) === 'held');
+  const hP = state.packets.filter(p => packetStatus(p) === 'held');
+  const hC = state.cards.filter(c => cardStatus(c) === 'held');
+  if (hB.length + hP.length + hC.length === 0) { toast('沒有可售庫存'); return; }
+  const bo = hB.map(b => `<option value="box:${b.id}">[盒] ${escapeHTML(b.product)} (成本 ${fmt(b.cost_hkd)})</option>`).join('');
+  const po = hP.map(p => `<option value="packet:${p.id}">[包] ${escapeHTML(p.product)} (成本 ${fmt(p.cost_hkd)})</option>`).join('');
+  const co = hC.map(c => `<option value="card:${c.id}">[卡] ${escapeHTML(c.card_name)}${c.card_number ? ' ' + escapeHTML(c.card_number) : ''} (成本 ${fmt(c.cost_hkd)})</option>`).join('');
+  const cur = CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('');
+  document.getElementById('modal-content').innerHTML = `
+    <h3>新增銷售</h3>
+    <div class="modal-field"><label>日期</label><input type="date" id="sl-date" value="${todayISO()}"></div>
+    <div class="modal-field"><label>要賣的項目</label><select id="sl-item">${bo}${po}${co}</select></div>
+    <div class="modal-field" style="display:flex;gap:0.5rem">
+      <div style="flex:1"><label>貨幣</label><select id="sl-currency" onchange="document.getElementById('sl-rate').value = (({HKD:1,JPY:0.05,MOP:0.97,CNY:0.88,USD:7.8,TWD:0.24})[this.value] || 1)">${cur}</select></div>
+      <div style="flex:1"><label>匯率</label><input type="number" id="sl-rate" step="0.0001" value="0.97"></div>
+    </div>
+    <div class="modal-field"><label>金額（當地貨幣）</label><input type="number" id="sl-amount" step="0.01" value="0"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmSell()">確認</button>
+    </div>`;
+  document.getElementById('sl-currency').value = 'MOP';
+  document.getElementById('modal-backdrop').classList.add('show');
+}
+
+function confirmSell() {
+  const date = document.getElementById('sl-date').value;
+  const [it, id] = document.getElementById('sl-item').value.split(':');
+  const currency = document.getElementById('sl-currency').value;
+  const rate = num(document.getElementById('sl-rate').value);
+  const amountLocal = num(document.getElementById('sl-amount').value);
+  const amountHKD = amountLocal * rate;
+  const sale = { id: uuid(), date, item_type: it, item_id: id, currency, rate, amount_local: amountLocal, amount_hkd: amountHKD };
+  state.sales.push(sale);
+  if (it === 'box') { const b = state.boxes.find(x => x.id === id); if (b) b.sold_sale_id = sale.id; }
+  else if (it === 'packet') { const p = state.packets.find(x => x.id === id); if (p) p.sold_sale_id = sale.id; }
+  else if (it === 'card') { const c = state.cards.find(x => x.id === id); if (c) c.sold_sale_id = sale.id; }
+  saveKey('sales', state.sales);
+  saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
+  closeModal();
+  renderAll();
+  toast(`已記錄 ${fmt(amountHKD)} HKD`);
+}
+
+function deleteSale(id) {
+  if (!confirm('確定刪除？對應庫存會恢復持有')) return;
+  for (const b of state.boxes) if (b.sold_sale_id === id) b.sold_sale_id = null;
+  for (const p of state.packets) if (p.sold_sale_id === id) p.sold_sale_id = null;
+  for (const c of state.cards) if (c.sold_sale_id === id) c.sold_sale_id = null;
+  state.sales = state.sales.filter(x => x.id !== id);
+  saveKey('sales', state.sales);
+  saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
+  renderAll();
+}
+
+function batchUpdatePrice(kind) {
+  const arr = kind === 'box' ? state.boxes : state.packets;
+  const sf = kind === 'box' ? boxStatus : packetStatus;
+  const held = arr.filter(x => sf(x) === 'held');
+  const groups = {};
+  for (const x of held) {
+    const k = x.product || '(未命名)';
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(x);
+  }
+  const names = Object.keys(groups);
+  if (names.length === 0) { toast('無持有'); return; }
+  const opts = names.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)} (${groups[n].length})</option>`).join('');
+  document.getElementById('modal-content').innerHTML = `
+    <h3>批次更新${kind === 'box' ? '盒' : '卡包'}現價</h3>
+    <div class="modal-field"><label>選擇商品</label><select id="bu-product">${opts}</select></div>
+    <div class="modal-field"><label>新現價（HKD）</label><input type="number" id="bu-price" step="0.01" value="0"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmBatchPrice('${kind}')">套用</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('show');
+}
+function confirmBatchPrice(kind) {
+  const product = document.getElementById('bu-product').value;
+  const price = num(document.getElementById('bu-price').value);
+  const arr = kind === 'box' ? state.boxes : state.packets;
+  const sf = kind === 'box' ? boxStatus : packetStatus;
+  let count = 0;
+  for (const x of arr) if (sf(x) === 'held' && (x.product || '(未命名)') === product) { x.market_price_hkd = price; count++; }
+  saveKey(kind === 'box' ? 'boxes' : 'packets', arr);
+  closeModal();
+  if (kind === 'box') renderBoxes(); else renderPackets();
+  renderDashboard();
+  toast(`已更新 ${count}`);
+}
+
+function batchUpdateCardPrice() {
+  const held = state.cards.filter(c => cardStatus(c) === 'held');
+  const groups = {};
+  for (const c of held) {
+    const k = c.card_name || c.box_code || '(未命名)';
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(c);
+  }
+  const names = Object.keys(groups);
+  if (names.length === 0) { toast('無持有'); return; }
+  const opts = names.map(n => `<option value="${escapeHTML(n)}">${escapeHTML(n)} (${groups[n].length})</option>`).join('');
+  document.getElementById('modal-content').innerHTML = `
+    <h3>批次更新單卡現價</h3>
+    <div class="modal-field"><label>選擇</label><select id="cu-name">${opts}</select></div>
+    <div class="modal-field"><label>新現價（HKD）</label><input type="number" id="cu-price" step="0.01" value="0"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmBatchCardPrice()">套用</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('show');
+}
+function confirmBatchCardPrice() {
+  const name = document.getElementById('cu-name').value;
+  const price = num(document.getElementById('cu-price').value);
+  let count = 0;
+  for (const c of state.cards) if (cardStatus(c) === 'held' && (c.card_name || c.box_code || '(未命名)') === name) { c.market_price_hkd = price; count++; }
+  saveKey('cards', state.cards);
+  closeModal();
+  renderCards(); renderDashboard();
+  toast(`已更新 ${count}`);
+}
+
+function closeModal() { document.getElementById('modal-backdrop').classList.remove('show'); }
+
+function exportJSON() {
+  const data = {
+    version: 4, exported_at: new Date().toISOString(),
+    purchases: state.purchases, boxes: state.boxes, packets: state.packets,
+    cards: state.cards, openings: state.openings, sales: state.sales, settings: state.settings
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Memi鋪_backup_${todayISO()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('已匯出');
+}
+
+function showImportModal() {
+  document.getElementById('modal-content').innerHTML = `
+    <h3>從 JSON 匯入</h3>
+    <div class="modal-field" style="font-size:0.8rem;color:var(--text-dim)">貼上 JSON，會覆蓋現有資料。</div>
+    <div class="modal-field"><label>JSON</label><textarea id="im-text" rows="8" style="font-family:monospace;font-size:0.72rem"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmImport()">覆蓋匯入</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('show');
+}
+async function confirmImport() {
+  const text = document.getElementById('im-text').value.trim();
+  try {
+    const data = JSON.parse(text);
+    state.purchases = data.purchases || [];
+    state.boxes = data.boxes || [];
+    state.packets = data.packets || [];
+    state.cards = data.cards || [];
+    state.openings = data.openings || [];
+    state.sales = data.sales || [];
+    if (data.settings) state.settings = { ...state.settings, ...data.settings };
+    await Promise.all(DATA_KEYS.map(k => saveKey(k, state[k])));
+    closeModal();
+    renderAll();
+    refreshDataLists();
+    toast('已匯入');
+  } catch (e) {
+    toast('JSON 格式錯誤', true);
+  }
+}
+
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const target = btn.dataset.tab;
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.section').forEach(s => s.classList.toggle('active', s.id === target));
+  });
+});
+
+// expose to window for onclick handlers
+window.saveFirebaseConfig = saveFirebaseConfig;
+window.resetFirebaseConfig = resetFirebaseConfig;
+window.addPurchase = addPurchase;
+window.deletePurchase = deletePurchase;
+window.deleteCard = deleteCard;
+window.addCardManually = addCardManually;
+window.showOpenBoxModal = showOpenBoxModal;
+window.confirmOpenBox = confirmOpenBox;
+window.showAddCardsToOpeningModal = showAddCardsToOpeningModal;
+window.confirmAddCards = confirmAddCards;
+window.deleteOpening = deleteOpening;
+window.showSellModal = showSellModal;
+window.confirmSell = confirmSell;
+window.deleteSale = deleteSale;
+window.batchUpdatePrice = batchUpdatePrice;
+window.confirmBatchPrice = confirmBatchPrice;
+window.batchUpdateCardPrice = batchUpdateCardPrice;
+window.confirmBatchCardPrice = confirmBatchCardPrice;
+window.closeModal = closeModal;
+window.exportJSON = exportJSON;
+window.showImportModal = showImportModal;
+window.confirmImport = confirmImport;
+window.addSetting = addSetting;
+window.removeSetting = removeSetting;
+
+function start() {
+  const cfgText = localStorage.getItem('memi_firebase_config');
+  if (!cfgText) {
+    document.getElementById('setup').style.display = 'block';
+    return;
+  }
+  try {
+    const cfg = JSON.parse(cfgText);
+    document.getElementById('app').style.display = 'block';
+    setSync('loading', '連接 Firebase…');
+    initFirebase(cfg);
+  } catch (e) {
+    alert('Firebase 設定損壞，已清除。請重新設定。');
+    localStorage.removeItem('memi_firebase_config');
+    location.reload();
+  }
+}
+
+window.addEventListener('firebase-ready', start);
+</script>
+</body>
+</html>
