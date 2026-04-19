@@ -316,8 +316,14 @@
     .metric-value { font-size: 0.95rem; }
     .metric-sub { font-size: 0.62rem; }
     .section-title { font-size: 1.4rem; }
-    .table-wrapper { display: none; }
-    .mobile-cards { display: block; }
+    /* Mobile uses table with horizontal scroll, not card layout */
+    .mobile-cards { display: none; }
+    .table-wrapper { display: block; -webkit-overflow-scrolling: touch; }
+    .data-table { font-size: 0.78rem; }
+    .data-table th, .data-table td { padding: 0.35rem 0.4rem; }
+    .cell-input { font-size: 0.78rem; padding: 0.25rem 0.35rem; }
+    .cell-input.wide { min-width: 100px; }
+    .cell-input.narrow { min-width: 50px; max-width: 70px; }
     .breakdown-table { font-size: 0.75rem; }
     .breakdown-table th, .breakdown-table td { padding: 0.4rem 0.5rem; }
   }
