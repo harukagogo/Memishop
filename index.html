@@ -506,7 +506,8 @@ const state = {
 
 // 表格排序狀態：按 kind 分別記錄。null = 不排序（陣列自然順序）
 const sortState = {
-  purchases: null, boxes: null, packets: null, cards: null, openings: null, sales: null
+  purchases: null, boxes: null, packets: null, cards: null, openings: null, sales: null,
+  breakdown: { field: 'market', dir: 'desc' }  // 預設按現值降序
 };
 
 function toggleSort(kind, field) {
@@ -516,7 +517,12 @@ function toggleSort(kind, field) {
   } else if (cur.dir === 'asc') {
     sortState[kind] = { field, dir: 'desc' };
   } else {
-    sortState[kind] = null; // 第三次點回到自然順序
+    // Breakdown 一定要有排序（預設按現值降序）；其他可以回到自然順序
+    if (kind === 'breakdown') {
+      sortState[kind] = { field, dir: 'asc' };
+    } else {
+      sortState[kind] = null;
+    }
   }
   renderAll();
 }
@@ -956,20 +962,36 @@ function renderBreakdown() {
   const host = document.getElementById('breakdown-host');
   const groups = {};
   const push = (k, type, cost, market) => {
-    if (!groups[k]) groups[k] = { box: 0, packet: 0, card: 0, cost: 0, market: 0 };
+    if (!groups[k]) groups[k] = { name: k, box: 0, packet: 0, card: 0, cost: 0, market: 0 };
     groups[k][type]++; groups[k].cost += num(cost); groups[k].market += num(market);
   };
   for (const b of state.boxes) if (boxStatus(b) === 'held') push(b.product || '(未命名)', 'box', b.cost_hkd, b.market_price_hkd);
   for (const p of state.packets) if (packetStatus(p) === 'held') push(p.product || '(未命名)', 'packet', p.cost_hkd, p.market_price_hkd);
   for (const c of state.cards) if (cardStatus(c) === 'held') push(cardTitle(c), 'card', c.cost_hkd, c.market_price_hkd);
-  const rows = Object.entries(groups).sort((a, b) => b[1].market - a[1].market);
-  if (rows.length === 0) { host.innerHTML = '<div class="empty-state">尚無庫存</div>'; return; }
-  let html = '<div style="overflow-x:auto"><table class="breakdown-table"><thead><tr><th>商品</th><th style="text-align:right">盒</th><th style="text-align:right">包</th><th style="text-align:right">張</th><th style="text-align:right">成本</th><th style="text-align:right">現值</th><th style="text-align:right">盈虧</th></tr></thead><tbody>';
-  for (const [name, g] of rows) {
+
+  const items = Object.values(groups);
+  if (items.length === 0) { host.innerHTML = '<div class="empty-state">尚無庫存</div>'; return; }
+
+  const rows = sortArray(items, 'breakdown', (g, f) => {
+    if (f === 'pl') return g.market - g.cost;
+    return g[f];
+  });
+
+  let html = '<div style="overflow-x:auto"><table class="breakdown-table"><thead><tr>';
+  html += sortableTh('breakdown','name','商品');
+  html += sortableTh('breakdown','box','盒','text-align:right');
+  html += sortableTh('breakdown','packet','包','text-align:right');
+  html += sortableTh('breakdown','card','張','text-align:right');
+  html += sortableTh('breakdown','cost','成本','text-align:right');
+  html += sortableTh('breakdown','market','現值','text-align:right');
+  html += sortableTh('breakdown','pl','盈虧','text-align:right');
+  html += '</tr></thead><tbody>';
+
+  for (const g of rows) {
     const pl = g.market - g.cost;
     const plCls = pl >= 0 ? 'positive' : 'negative';
     const plSign = pl >= 0 ? '+' : '';
-    html += `<tr><td>${escapeHTML(name)}</td><td class="num">${g.box || '—'}</td><td class="num">${g.packet || '—'}</td><td class="num">${g.card || '—'}</td><td class="num">${fmt(g.cost)}</td><td class="num">${fmt(g.market)}</td><td class="num ${plCls}">${plSign}${fmt(pl)}</td></tr>`;
+    html += `<tr><td>${escapeHTML(g.name)}</td><td class="num">${g.box || '—'}</td><td class="num">${g.packet || '—'}</td><td class="num">${g.card || '—'}</td><td class="num">${fmt(g.cost)}</td><td class="num">${fmt(g.market)}</td><td class="num ${plCls}">${plSign}${fmt(pl)}</td></tr>`;
   }
   html += '</tbody></table></div>';
   host.innerHTML = html;
@@ -1319,14 +1341,22 @@ function renderSettings() {
   const makeSection = (title, key) => {
     const items = state.settings[key] || [];
     const list = items.map((v, i) => `
-      <li><span>${escapeHTML(v)}</span><button class="row-del" onclick="removeSetting('${key}', ${i})">✕</button></li>`).join('');
+      <li>
+        <input type="text" value="${escapeHTML(v)}"
+               onchange="updateSetting('${key}', ${i}, this.value)"
+               style="flex:1;background:transparent;border:none;color:var(--text);padding:0.2rem 0.3rem;font-family:inherit;font-size:0.9rem;outline:none;border-bottom:1px solid transparent;transition:border-color 0.15s"
+               onfocus="this.style.borderBottomColor='var(--gold-dim)'"
+               onblur="this.style.borderBottomColor='transparent'">
+        <button class="row-del" onclick="removeSetting('${key}', ${i})" title="移除">✕</button>
+      </li>`).join('');
     return `<div style="margin-bottom:1.5rem">
       <h3 style="font-family:var(--font-display);color:var(--text);font-size:1.1rem;margin-bottom:0.6rem">${title}</h3>
       ${items.length ? `<ul class="manage-list">${list}</ul>` : '<div style="color:var(--text-dim);font-size:0.85rem;padding:0.5rem">尚無項目</div>'}
       <div style="display:flex;gap:0.5rem;margin-top:0.6rem">
-        <input id="add-${key}" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.7rem;font-family:inherit;font-size:0.9rem" placeholder="新增${title}">
+        <input id="add-${key}" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.7rem;font-family:inherit;font-size:0.9rem" placeholder="新增${title}" onkeydown="if(event.key==='Enter'){event.preventDefault();addSetting('${key}');}">
         <button class="btn btn-primary" onclick="addSetting('${key}')">＋ 加入</button>
       </div>
+      <div style="font-size:0.7rem;color:var(--text-muted);margin-top:0.4rem">點上方項目可直接編輯文字（現有資料不受影響）</div>
     </div>`;
   };
 
@@ -1390,6 +1420,27 @@ function removeSetting(key, idx) {
   saveKey('settings', state.settings);
   renderSettings();
   refreshDataLists();
+}
+
+function updateSetting(key, idx, value) {
+  const trimmed = (value || '').trim();
+  if (!trimmed) {
+    // 空值視為移除
+    if (!confirm('清空會移除此項目，確定嗎？')) { renderSettings(); return; }
+    state.settings[key].splice(idx, 1);
+  } else {
+    // 檢查是否與其他項目重複
+    const dupIdx = state.settings[key].findIndex((v, i) => i !== idx && v === trimmed);
+    if (dupIdx >= 0) {
+      toast('已有相同項目', true);
+      renderSettings();
+      return;
+    }
+    state.settings[key][idx] = trimmed;
+  }
+  saveKey('settings', state.settings);
+  refreshDataLists();
+  // 不呼叫 renderSettings()，避免 input 失去焦點（其他欄位也不會動）
 }
 
 function refreshDataLists() {
@@ -2153,6 +2204,7 @@ window.showImportModal = showImportModal;
 window.confirmImport = confirmImport;
 window.addSetting = addSetting;
 window.removeSetting = removeSetting;
+window.updateSetting = updateSetting;
 window.saveDefaultRate = saveDefaultRate;
 window.toggleSort = toggleSort;
 Object.defineProperty(window, 'DEFAULT_RATES', { get: () => DEFAULT_RATES });
