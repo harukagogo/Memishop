@@ -176,7 +176,13 @@
     box-shadow: inset 0 -1px 0 var(--gold);
   }
   .cell-input.num { font-family: var(--font-mono); text-align: right; }
-  .cell-input[type="date"] { font-family: var(--font-mono); font-size: 0.78rem; min-width: 120px; }
+  .cell-input[type="date"] { font-family: var(--font-mono); font-size: 0.78rem; min-width: 140px; cursor: pointer; color-scheme: dark; }
+  .cell-input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer; opacity: 0.8; padding: 0; margin-left: 0.25rem;
+  }
+  .cell-input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+  .modal-field input[type="date"] { cursor: pointer; color-scheme: dark; }
+  .mobile-card-field input[type="date"] { cursor: pointer; color-scheme: dark; }
   .cell-input.wide { min-width: 150px; }
   .cell-input.narrow { min-width: 60px; }
   .cell-input::placeholder { color: var(--text-muted); font-style: italic; }
@@ -720,7 +726,7 @@ function syncPurchaseToInventory(purchase) {
     const heldCards = existingCards.filter(c => cardStatus(c) === 'held');
     let currentCount = existingCards.length;
     while (currentCount < targetCount) {
-      state.cards.push({ id: uuid(), source_purchase_id: purchase.id, source_opening_id: null, card_name: '', box_code: purchase.product || '', card_number: '', category: purchase.category || '', cost_hkd: perUnitCost, market_price_hkd: 0, sold_sale_id: null, note: purchase.note || '' });
+      state.cards.push({ id: uuid(), source_purchase_id: purchase.id, source_opening_id: null, card_name: '', box_code: purchase.product || '', card_number: purchase.card_number || '', category: purchase.category || '', source: purchase.source || '', cost_hkd: perUnitCost, market_price_hkd: 0, sold_sale_id: null, note: purchase.note || '' });
       currentCount++;
     }
     while (currentCount > targetCount && heldCards.length > 0) {
@@ -731,7 +737,12 @@ function syncPurchaseToInventory(purchase) {
     }
     for (const c of state.cards) {
       if (c.source_purchase_id === purchase.id && cardStatus(c) === 'held') {
-        c.cost_hkd = perUnitCost; c.category = purchase.category || ''; c.box_code = purchase.product || '';
+        c.cost_hkd = perUnitCost;
+        c.category = purchase.category || '';
+        c.box_code = purchase.product || '';
+        c.card_number = purchase.card_number || '';
+        c.source = purchase.source || '';
+        if (purchase.note) c.note = purchase.note;
       }
     }
   }
@@ -804,11 +815,16 @@ function renderPurchases() {
   for (const p of state.purchases) {
     const unitHKD = num(p.unit_price) * num(p.rate);
     const totalHKD = unitHKD * num(p.qty);
+    const isCard = p.buy_type === '單卡';
+    const cardNumCell = isCard
+      ? inCell('card_number', p.card_number, 'narrow', '卡編號')
+      : '<span class="computed" style="display:block;background:transparent">—</span>';
     rows += `<tr data-id="${p.id}" data-kind="purchase">
       <td>${inCell('date', p.date, '', '', 'date')}</td>
       <td>${datalistCell('category', p.category, 'category-list', '', '類別')}</td>
-      <td>${datalistCell('product', p.product, 'product-list', 'wide', '編號')}</td>
+      <td>${datalistCell('product', p.product, 'product-list', 'wide', '商品編號')}</td>
       <td>${selCell('buy_type', p.buy_type, BUY_TYPES)}</td>
+      <td>${cardNumCell}</td>
       <td>${curCell(p.currency)}</td>
       <td>${numCellHTML('rate', p.rate, 4)}</td>
       <td>${numCellHTML('unit_price', p.unit_price, 2)}</td>
@@ -827,8 +843,9 @@ function renderPurchases() {
       <div class="mobile-card-grid">
         <div class="mobile-card-field"><label>日期</label>${inCell('date', p.date, '', '', 'date')}</div>
         <div class="mobile-card-field"><label>類別</label>${datalistCell('category', p.category, 'category-list', '', '類別')}</div>
-        <div class="mobile-card-field"><label>商品編號</label>${datalistCell('product', p.product, 'product-list', '', '編號')}</div>
+        <div class="mobile-card-field"><label>商品編號</label>${datalistCell('product', p.product, 'product-list', '', '商品編號')}</div>
         <div class="mobile-card-field"><label>類型</label>${selCell('buy_type', p.buy_type, BUY_TYPES)}</div>
+        ${isCard ? `<div class="mobile-card-field full"><label>卡編號</label>${inCell('card_number', p.card_number, '', '卡編號')}</div>` : ''}
         <div class="mobile-card-field"><label>貨幣</label>${curCell(p.currency)}</div>
         <div class="mobile-card-field"><label>當時匯率</label>${numCellHTML('rate', p.rate, 4)}</div>
         <div class="mobile-card-field"><label>單價（當地）</label>${numCellHTML('unit_price', p.unit_price, 2)}</div>
@@ -842,7 +859,7 @@ function renderPurchases() {
     </div>`;
   }
   host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
-    <th>日期</th><th>類別</th><th>商品編號</th><th>類型</th><th>貨幣</th><th>匯率</th><th>單價</th><th>數量</th>
+    <th>日期</th><th>類別</th><th>商品編號</th><th>類型</th><th>卡編號</th><th>貨幣</th><th>匯率</th><th>單價</th><th>數量</th>
     <th>單價 HKD</th><th>小計 HKD</th><th>來源</th><th>備註</th><th></th>
   </tr></thead><tbody>${rows}</tbody></table></div>
   <div class="mobile-cards">${mobile}</div>`;
@@ -872,7 +889,7 @@ function renderContainerInventory(host, items, kind, statusFn) {
     rows += `<tr data-id="${item.id}" data-kind="${kind}">
       <td class="status"><span class="status-pill status-${st}">${stLabel}</span></td>
       <td>${inCell('product', item.product, 'wide', '商品編號')}</td>
-      <td>${inCell('category', item.category, '', '類別')}</td>
+      <td>${datalistCell('category', item.category, 'category-list', '', '類別')}</td>
       <td class="computed">${fmt(item.cost_hkd)}</td>
       <td>${st === 'held' ? numCellHTML('market_price_hkd', item.market_price_hkd, 2) : '<span class="computed" style="display:block">—</span>'}</td>
       <td class="computed ${plCls}">${st === 'held' ? plSign + fmt(pl) : '—'}</td>
@@ -884,7 +901,7 @@ function renderContainerInventory(host, items, kind, statusFn) {
         <span class="status-pill status-${st}">${stLabel}</span>
       </div>
       <div class="mobile-card-grid">
-        <div class="mobile-card-field"><label>類別</label>${inCell('category', item.category, '', '類別')}</div>
+        <div class="mobile-card-field"><label>類別</label>${datalistCell('category', item.category, 'category-list', '', '類別')}</div>
         <div class="mobile-card-field"><label>成本 HKD</label><div class="computed-val">${fmt(item.cost_hkd)}</div></div>
         ${st === 'held' ? `
           <div class="mobile-card-field"><label>現價 HKD</label>${numCellHTML('market_price_hkd', item.market_price_hkd, 2)}</div>
@@ -911,14 +928,18 @@ function renderCards() {
     const plCls = st === 'held' ? (pl >= 0 ? 'positive' : 'negative') : '';
     const plSign = pl >= 0 ? '+' : '';
     const stLabel = st === 'held' ? '持有' : '已賣';
-    const src = c.source_purchase_id ? '買入' : c.source_opening_id ? '開箱' : '手動';
+    const origin = c.source_purchase_id ? '買入' : c.source_opening_id ? '開箱' : '手動';
+    const sourceCell = c.source_opening_id
+      ? '<span class="computed" style="display:block;background:transparent;text-align:center;font-size:0.72rem">（開箱）</span>'
+      : datalistCell('source', c.source, 'source-list', '', '來源');
     rows += `<tr data-id="${c.id}" data-kind="card">
       <td class="status"><span class="status-pill status-${st}">${stLabel}</span></td>
-      <td>${inCell('box_code', c.box_code, 'narrow', '盒編號')}</td>
+      <td>${datalistCell('category', c.category, 'category-list', '', '類別')}</td>
+      <td>${inCell('box_code', c.box_code, 'narrow', '商品編號')}</td>
       <td>${inCell('card_number', c.card_number, 'narrow', '卡編號')}</td>
       <td>${inCell('card_name', c.card_name, 'wide', '卡名')}</td>
-      <td>${inCell('category', c.category, '', '類別')}</td>
-      <td class="computed" style="font-size:0.72rem;text-align:center">${src}</td>
+      <td>${sourceCell}</td>
+      <td class="computed" style="font-size:0.72rem;text-align:center">${origin}</td>
       <td>${numCellHTML('cost_hkd', c.cost_hkd, 2)}</td>
       <td>${st === 'held' ? numCellHTML('market_price_hkd', c.market_price_hkd, 2) : '<span class="computed" style="display:block">—</span>'}</td>
       <td class="computed ${plCls}">${st === 'held' ? plSign + fmt(pl) : '—'}</td>
@@ -927,15 +948,16 @@ function renderCards() {
     </tr>`;
     mobile += `<div class="mobile-card" data-id="${c.id}" data-kind="card">
       <div class="mobile-card-header">
-        <div class="mobile-card-title">${escapeHTML(c.card_name || '(未命名)')} ${c.card_number ? '<span style="color:var(--text-dim);font-weight:normal">' + escapeHTML(c.card_number) + '</span>' : ''}</div>
+        <div class="mobile-card-title">${escapeHTML(c.card_name || c.card_number || '(未命名)')} ${c.card_name && c.card_number ? '<span style="color:var(--text-dim);font-weight:normal">' + escapeHTML(c.card_number) + '</span>' : ''}</div>
         <span class="status-pill status-${st}">${stLabel}</span>
       </div>
       <div class="mobile-card-grid">
-        <div class="mobile-card-field"><label>盒編號</label>${inCell('box_code', c.box_code, '', '盒編號')}</div>
+        <div class="mobile-card-field"><label>類別</label>${datalistCell('category', c.category, 'category-list', '', '類別')}</div>
+        <div class="mobile-card-field"><label>取得方式</label><div class="computed-val">${origin}</div></div>
+        <div class="mobile-card-field"><label>商品編號</label>${inCell('box_code', c.box_code, '', '商品編號')}</div>
         <div class="mobile-card-field"><label>卡編號</label>${inCell('card_number', c.card_number, '', '卡編號')}</div>
         <div class="mobile-card-field full"><label>卡名</label>${inCell('card_name', c.card_name, '', '卡名')}</div>
-        <div class="mobile-card-field"><label>類別</label>${inCell('category', c.category, '', '類別')}</div>
-        <div class="mobile-card-field"><label>來源</label><div class="computed-val">${src}</div></div>
+        <div class="mobile-card-field full"><label>購買來源</label>${c.source_opening_id ? '<div class="computed-val">（開箱產出）</div>' : datalistCell('source', c.source, 'source-list', '', 'Mercari / 煤炭 等')}</div>
         <div class="mobile-card-field"><label>成本 HKD</label>${numCellHTML('cost_hkd', c.cost_hkd, 2)}</div>
         ${st === 'held' ? `
           <div class="mobile-card-field"><label>現價 HKD</label>${numCellHTML('market_price_hkd', c.market_price_hkd, 2)}</div>
@@ -947,8 +969,8 @@ function renderCards() {
     </div>`;
   }
   host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
-    <th>狀態</th><th>盒編號</th><th>卡編號</th><th>卡名</th><th>類別</th>
-    <th>來源</th><th>成本 HKD</th><th>現價 HKD</th><th>帳面盈虧</th><th>備註</th><th></th>
+    <th>狀態</th><th>類別</th><th>商品編號</th><th>卡編號</th><th>卡名</th>
+    <th>購買來源</th><th>取得方式</th><th>成本 HKD</th><th>現價 HKD</th><th>帳面盈虧</th><th>備註</th><th></th>
   </tr></thead><tbody>${rows}</tbody></table></div>
   <div class="mobile-cards">${mobile}</div>`;
 }
@@ -1098,7 +1120,8 @@ function refreshDataLists() {
   const make = (id, items) => {
     const dl = document.createElement('datalist');
     dl.id = id;
-    dl.innerHTML = (items || []).map(c => `<option value="${escapeHTML(c)}">`).join('');
+    const clean = (items || []).filter(x => x && String(x).trim() !== '');
+    dl.innerHTML = clean.map(c => `<option value="${escapeHTML(c)}">`).join('');
     document.body.appendChild(dl);
   };
   make('category-list', state.settings.categories);
@@ -1177,7 +1200,8 @@ function addPurchase() {
   const p = {
     id: uuid(), date: todayISO(),
     category: (state.settings.categories || [])[0] || '',
-    product: '', buy_type: '盒', currency: 'JPY', rate: DEFAULT_RATES.JPY,
+    product: '', buy_type: '盒', card_number: '',
+    currency: 'JPY', rate: DEFAULT_RATES.JPY,
     unit_price: 0, qty: 1, source: '', note: ''
   };
   state.purchases.push(p);
@@ -1223,6 +1247,7 @@ function addCardManually() {
     id: uuid(), source_purchase_id: null, source_opening_id: null,
     card_name: '', box_code: '', card_number: '',
     category: (state.settings.categories || [])[0] || '',
+    source: '',
     cost_hkd: 0, market_price_hkd: 0, sold_sale_id: null, note: '手動新增'
   });
   saveKey('cards', state.cards);
@@ -1350,19 +1375,44 @@ function showSellModal() {
   const hP = state.packets.filter(p => packetStatus(p) === 'held');
   const hC = state.cards.filter(c => cardStatus(c) === 'held');
   if (hB.length + hP.length + hC.length === 0) { toast('沒有可售庫存'); return; }
-  const bo = hB.map(b => `<option value="box:${b.id}">[盒] ${escapeHTML(b.product)} (成本 ${fmt(b.cost_hkd)})</option>`).join('');
-  const po = hP.map(p => `<option value="packet:${p.id}">[包] ${escapeHTML(p.product)} (成本 ${fmt(p.cost_hkd)})</option>`).join('');
-  const co = hC.map(c => `<option value="card:${c.id}">[卡] ${escapeHTML(c.card_name)}${c.card_number ? ' ' + escapeHTML(c.card_number) : ''} (成本 ${fmt(c.cost_hkd)})</option>`).join('');
+
+  const mkRow = (key, label, cost) => `
+    <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.55rem;border-bottom:1px solid var(--border-soft);cursor:pointer">
+      <input type="checkbox" class="sl-check" data-key="${key}" data-cost="${cost}" style="width:auto;accent-color:var(--gold)">
+      <span style="flex:1;font-size:0.85rem">${label}</span>
+      <span style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim)">${fmt(cost)}</span>
+      <input type="number" class="sl-item-price" data-key="${key}" step="0.01" placeholder="金額" style="width:90px;display:none;font-family:var(--font-mono);font-size:0.8rem;padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">
+    </label>`;
+
+  const bo = hB.map(b => mkRow('box:' + b.id, `[盒] ${escapeHTML(b.product)}`, b.cost_hkd)).join('');
+  const po = hP.map(p => mkRow('packet:' + p.id, `[包] ${escapeHTML(p.product)}`, p.cost_hkd)).join('');
+  const co = hC.map(c => mkRow('card:' + c.id, `[卡] ${escapeHTML(c.card_name)}${c.card_number ? ' ' + escapeHTML(c.card_number) : ''}`, c.cost_hkd)).join('');
   const cur = CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('');
+
   document.getElementById('modal-content').innerHTML = `
     <h3>新增銷售</h3>
     <div class="modal-field"><label>日期</label><input type="date" id="sl-date" value="${todayISO()}"></div>
-    <div class="modal-field"><label>要賣的項目</label><select id="sl-item">${bo}${po}${co}</select></div>
+    <div class="modal-field">
+      <label>計價模式</label>
+      <div style="display:flex;gap:0.5rem">
+        <label style="flex:1;display:flex;align-items:center;gap:0.4rem;padding:0.5rem;border:1px solid var(--border);cursor:pointer;border-radius:4px">
+          <input type="radio" name="sl-mode" value="lump" checked onchange="updateSellMode()" style="accent-color:var(--gold)"> 整批一個金額
+        </label>
+        <label style="flex:1;display:flex;align-items:center;gap:0.4rem;padding:0.5rem;border:1px solid var(--border);cursor:pointer;border-radius:4px">
+          <input type="radio" name="sl-mode" value="each" onchange="updateSellMode()" style="accent-color:var(--gold)"> 各項自訂價
+        </label>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>選擇要賣的項目（可複選）</label>
+      <div style="border:1px solid var(--border);background:var(--bg);max-height:280px;overflow-y:auto">${bo}${po}${co}</div>
+    </div>
     <div class="modal-field" style="display:flex;gap:0.5rem">
       <div style="flex:1"><label>貨幣</label><select id="sl-currency" onchange="document.getElementById('sl-rate').value = (({HKD:1,JPY:0.05,MOP:0.97,CNY:0.88,USD:7.8,TWD:0.24})[this.value] || 1)">${cur}</select></div>
       <div style="flex:1"><label>匯率</label><input type="number" id="sl-rate" step="0.0001" value="0.97"></div>
     </div>
-    <div class="modal-field"><label>金額（當地貨幣）</label><input type="number" id="sl-amount" step="0.01" value="0"></div>
+    <div class="modal-field" id="sl-lump-field"><label>總金額（當地貨幣）</label><input type="number" id="sl-amount" step="0.01" value="0"><div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">按成本比例自動分攤到各項</div></div>
+    <div class="modal-field" id="sl-each-field" style="display:none;font-size:0.72rem;color:var(--text-dim)">勾選後右側會出現輸入框，分別填每項的金額</div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">取消</button>
       <button class="btn btn-primary" onclick="confirmSell()">確認</button>
@@ -1371,23 +1421,70 @@ function showSellModal() {
   document.getElementById('modal-backdrop').classList.add('show');
 }
 
+function updateSellMode() {
+  const mode = document.querySelector('input[name="sl-mode"]:checked').value;
+  document.getElementById('sl-lump-field').style.display = mode === 'lump' ? 'block' : 'none';
+  document.getElementById('sl-each-field').style.display = mode === 'each' ? 'block' : 'none';
+  document.querySelectorAll('.sl-item-price').forEach(el => {
+    el.style.display = (mode === 'each' && el.closest('label').querySelector('.sl-check').checked) ? 'inline-block' : 'none';
+  });
+}
+
+document.addEventListener('change', (e) => {
+  if (e.target.classList?.contains('sl-check')) {
+    const mode = document.querySelector('input[name="sl-mode"]:checked')?.value;
+    const priceInput = e.target.closest('label').querySelector('.sl-item-price');
+    if (priceInput) priceInput.style.display = (mode === 'each' && e.target.checked) ? 'inline-block' : 'none';
+  }
+});
+
 function confirmSell() {
   const date = document.getElementById('sl-date').value;
-  const [it, id] = document.getElementById('sl-item').value.split(':');
   const currency = document.getElementById('sl-currency').value;
   const rate = num(document.getElementById('sl-rate').value);
-  const amountLocal = num(document.getElementById('sl-amount').value);
-  const amountHKD = amountLocal * rate;
-  const sale = { id: uuid(), date, item_type: it, item_id: id, currency, rate, amount_local: amountLocal, amount_hkd: amountHKD };
-  state.sales.push(sale);
-  if (it === 'box') { const b = state.boxes.find(x => x.id === id); if (b) b.sold_sale_id = sale.id; }
-  else if (it === 'packet') { const p = state.packets.find(x => x.id === id); if (p) p.sold_sale_id = sale.id; }
-  else if (it === 'card') { const c = state.cards.find(x => x.id === id); if (c) c.sold_sale_id = sale.id; }
+  const mode = document.querySelector('input[name="sl-mode"]:checked').value;
+  const checked = Array.from(document.querySelectorAll('.sl-check:checked'));
+  if (checked.length === 0) { toast('請至少選一個項目', true); return; }
+
+  const items = checked.map(el => ({ key: el.dataset.key, cost: num(el.dataset.cost) }));
+
+  let itemAmounts = [];
+  if (mode === 'lump') {
+    const total = num(document.getElementById('sl-amount').value);
+    if (total <= 0) { toast('請輸入總金額', true); return; }
+    const totalCost = items.reduce((s, x) => s + x.cost, 0);
+    if (totalCost <= 0) {
+      const per = total / items.length;
+      itemAmounts = items.map(x => ({ ...x, amount_local: per }));
+    } else {
+      itemAmounts = items.map(x => ({ ...x, amount_local: total * (x.cost / totalCost) }));
+    }
+  } else {
+    for (const x of items) {
+      const el = document.querySelector(`.sl-item-price[data-key="${x.key}"]`);
+      const v = num(el.value);
+      if (v <= 0) { toast('所有選中項目都要填金額', true); return; }
+      itemAmounts.push({ ...x, amount_local: v });
+    }
+  }
+
+  let totalHKD = 0;
+  for (const x of itemAmounts) {
+    const [it, id] = x.key.split(':');
+    const amountHKD = x.amount_local * rate;
+    totalHKD += amountHKD;
+    const sale = { id: uuid(), date, item_type: it, item_id: id, currency, rate, amount_local: x.amount_local, amount_hkd: amountHKD };
+    state.sales.push(sale);
+    if (it === 'box') { const b = state.boxes.find(y => y.id === id); if (b) b.sold_sale_id = sale.id; }
+    else if (it === 'packet') { const p = state.packets.find(y => y.id === id); if (p) p.sold_sale_id = sale.id; }
+    else if (it === 'card') { const c = state.cards.find(y => y.id === id); if (c) c.sold_sale_id = sale.id; }
+  }
+
   saveKey('sales', state.sales);
   saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
   closeModal();
   renderAll();
-  toast(`已記錄 ${fmt(amountHKD)} HKD`);
+  toast(`已記錄 ${itemAmounts.length} 筆銷售 · 總 ${fmt(totalHKD)} HKD`);
 }
 
 function deleteSale(id) {
@@ -1542,6 +1639,7 @@ window.confirmAddCards = confirmAddCards;
 window.deleteOpening = deleteOpening;
 window.showSellModal = showSellModal;
 window.confirmSell = confirmSell;
+window.updateSellMode = updateSellMode;
 window.deleteSale = deleteSale;
 window.batchUpdatePrice = batchUpdatePrice;
 window.confirmBatchPrice = confirmBatchPrice;
