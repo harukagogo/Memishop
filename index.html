@@ -1301,7 +1301,7 @@ function renderSales() {
     const pl = e.pl;
     const plCls = pl >= 0 ? 'positive' : 'negative';
     const plSign = pl >= 0 ? '+' : '';
-    rows += `<tr>
+    rows += `<tr data-id="${s.id}" data-kind="sale">
       <td style="padding:0.55rem 0.7rem">${escapeHTML(s.date)}</td>
       <td style="padding:0.55rem 0.7rem">${escapeHTML(itemLabel)}</td>
       <td style="padding:0.55rem 0.7rem">${escapeHTML(s.currency)}</td>
@@ -1310,10 +1310,10 @@ function renderSales() {
       <td class="computed emphasis">${fmt(s.amount_hkd)}</td>
       <td class="computed">${fmt(cost)}</td>
       <td class="computed ${plCls}">${plSign}${fmt(pl)}</td>
-      <td style="padding:0.55rem 0.7rem">${escapeHTML(s.note || '')}</td>
+      <td style="padding:0">${inCell('note', s.note, 'wide', '備註')}</td>
       <td><button class="row-del" onclick="deleteSale('${s.id}')">✕</button></td>
     </tr>`;
-    mobile += `<div class="mobile-card">
+    mobile += `<div class="mobile-card" data-id="${s.id}" data-kind="sale">
       <div class="mobile-card-header">
         <div class="mobile-card-title">${escapeHTML(itemLabel)}</div>
         <div class="mobile-card-meta">${escapeHTML(s.date)}</div>
@@ -1325,7 +1325,7 @@ function renderSales() {
         <div class="mobile-card-field"><label>金額 HKD</label><div class="computed-val emphasis">${fmt(s.amount_hkd)}</div></div>
         <div class="mobile-card-field"><label>成本 HKD</label><div class="computed-val">${fmt(cost)}</div></div>
         <div class="mobile-card-field"><label>盈虧</label><div class="computed-val ${pl>=0?'positive':'negative'}">${plSign}${fmt(pl)}</div></div>
-        ${s.note ? `<div class="mobile-card-field full"><label>備註</label><div class="computed-val" style="text-align:left;font-family:inherit">${escapeHTML(s.note)}</div></div>` : ''}
+        <div class="mobile-card-field full"><label>備註</label>${inCell('note', s.note, '', '備註')}</div>
       </div>
       <div class="mobile-card-actions"><button class="btn" onclick="deleteSale('${s.id}')" style="font-size:0.75rem">刪除</button></div>
     </div>`;
@@ -1516,6 +1516,11 @@ function handleEdit(kind, id, field, el) {
     debouncedSave('cards');
     renderDashboard();
     if (field === 'market_price_hkd' || field === 'cost_hkd') renderCards();
+  } else if (kind === 'sale') {
+    const s = state.sales.find(x => x.id === id);
+    if (!s) return;
+    s[field] = value;
+    debouncedSave('sales');
   }
 }
 
