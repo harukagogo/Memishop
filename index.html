@@ -9,11 +9,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;800&family=Noto+Sans+TC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0f1217; --surface: #171b22; --surface-2: #1f2430;
-    --border: #2a303e; --border-soft: rgba(42, 48, 62, 0.5);
-    --text: #e8e4d8; --text-dim: #8a8778; --text-muted: #5a5a50;
-    --gold: #d4a04c; --gold-dim: #9a7538;
-    --green: #89b87a; --red: #d26a55; --blue: #6ba8d2;
+    --bg: #f4f8fa; --surface: #ffffff; --surface-2: #e8f2f4;
+    --border: #cfe0e3; --border-soft: rgba(207, 224, 227, 0.55);
+    --text: #1a3538; --text-dim: #5a7075; --text-muted: #8ba0a4;
+    --gold: #0d9488; --gold-dim: #0f766e;
+    --green: #16a34a; --red: #dc2626; --blue: #0284c7;
     --font-display: 'Noto Serif TC', serif;
     --font-body: 'Noto Sans TC', sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
@@ -26,8 +26,8 @@
   }
   body {
     background-image:
-      radial-gradient(circle at 15% 10%, rgba(212, 160, 76, 0.05) 0%, transparent 45%),
-      radial-gradient(circle at 85% 80%, rgba(212, 160, 76, 0.03) 0%, transparent 45%);
+      radial-gradient(circle at 15% 10%, rgba(13, 148, 136, 0.08) 0%, transparent 45%),
+      radial-gradient(circle at 85% 80%, rgba(13, 148, 136, 0.06) 0%, transparent 45%);
     background-attachment: fixed;
   }
   .container { max-width: 1400px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
@@ -163,7 +163,7 @@
     border: 1px solid;
   }
   .status-held { color: var(--blue); border-color: rgba(107, 168, 210, 0.3); background: rgba(107, 168, 210, 0.08); }
-  .status-opened { color: var(--gold); border-color: rgba(212, 160, 76, 0.3); background: rgba(212, 160, 76, 0.08); }
+  .status-opened { color: var(--gold); border-color: rgba(13, 148, 136, 0.3); background: rgba(13, 148, 136, 0.08); }
   .status-sold { color: var(--text-muted); border-color: rgba(90, 90, 80, 0.3); background: rgba(90, 90, 80, 0.08); }
 
   .cell-input, .cell-select {
@@ -172,17 +172,17 @@
     padding: 0.55rem 0.6rem; outline: none; transition: background 0.1s;
   }
   .cell-input:focus, .cell-select:focus {
-    background: rgba(212, 160, 76, 0.08);
+    background: rgba(13, 148, 136, 0.08);
     box-shadow: inset 0 -1px 0 var(--gold);
   }
   .cell-input.num { font-family: var(--font-mono); text-align: right; }
-  .cell-input[type="date"] { font-family: var(--font-mono); font-size: 0.78rem; min-width: 140px; cursor: pointer; color-scheme: dark; }
+  .cell-input[type="date"] { font-family: var(--font-mono); font-size: 0.78rem; min-width: 140px; cursor: pointer; color-scheme: light; }
   .cell-input[type="date"]::-webkit-calendar-picker-indicator {
     cursor: pointer; opacity: 0.8; padding: 0; margin-left: 0.25rem;
   }
   .cell-input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
-  .modal-field input[type="date"] { cursor: pointer; color-scheme: dark; }
-  .mobile-card-field input[type="date"] { cursor: pointer; color-scheme: dark; }
+  .modal-field input[type="date"] { cursor: pointer; color-scheme: light; }
+  .mobile-card-field input[type="date"] { cursor: pointer; color-scheme: light; }
   .cell-input.wide { min-width: 150px; }
   .cell-input.narrow { min-width: 60px; }
   .cell-input::placeholder { color: var(--text-muted); font-style: italic; }
@@ -506,7 +506,8 @@ const state = {
     categories: ['寶可夢', '海賊王', 'MTG', 'Union Arena', '遊戲王'],
     products: ['M2', 'SV9a', 'SV8', 'CLK', 'ホワイトフレア', 'MEGAドリーム', 'ロケット団', 'ムニキス', 'スペシャルBOX', '散卡', '神の島の冒険'],
     sources: ['Mercari', 'eBay', '煤炭', '聚龍軒', '直接店鋪', '朋友'],
-    default_rates: { HKD: 1, JPY: 0.05, MOP: 0.97, CNY: 1.14, USD: 7.8, TWD: 0.24 }
+    default_rates: { HKD: 1, JPY: 0.05, MOP: 0.97, CNY: 1.14, USD: 7.8, TWD: 0.24 },
+    product_images: {}
   }
 };
 
@@ -639,7 +640,8 @@ function normalizeSettings(s) {
     categories: normalizeToArray(s.categories),
     products: normalizeToArray(s.products),
     sources: normalizeToArray(s.sources),
-    default_rates: (s.default_rates && typeof s.default_rates === 'object' && !Array.isArray(s.default_rates)) ? s.default_rates : null
+    default_rates: (s.default_rates && typeof s.default_rates === 'object' && !Array.isArray(s.default_rates)) ? s.default_rates : null,
+    product_images: (s.product_images && typeof s.product_images === 'object' && !Array.isArray(s.product_images)) ? s.product_images : null
   };
 }
 
@@ -670,7 +672,8 @@ function initFirebase(cfg) {
             categories: norm.categories.length ? norm.categories : state.settings.categories,
             products: norm.products.length ? norm.products : state.settings.products,
             sources: norm.sources.length ? norm.sources : state.settings.sources,
-            default_rates: norm.default_rates || state.settings.default_rates
+            default_rates: norm.default_rates || state.settings.default_rates,
+            product_images: norm.product_images || state.settings.product_images || {}
           };
           syncDefaultRates();
         }
@@ -978,29 +981,68 @@ function renderBreakdown() {
   const items = Object.values(groups);
   if (items.length === 0) { host.innerHTML = '<div class="empty-state">尚無庫存</div>'; return; }
 
-  const rows = sortArray(items, 'breakdown', (g, f) => {
-    if (f === 'pl') return g.market - g.cost;
-    return g[f];
-  });
+  // 預計算 count、unit_cost、unit_market
+  for (const g of items) {
+    g.count = g.box + g.packet + g.card;
+    g.unit_cost = g.count > 0 ? g.cost / g.count : 0;
+    g.unit_market = g.count > 0 ? g.market / g.count : 0;
+    g.pl = g.market - g.cost;
+  }
+
+  const rows = sortArray(items, 'breakdown', (g, f) => g[f]);
 
   let html = '<div style="overflow-x:auto"><table class="breakdown-table"><thead><tr>';
   html += sortableTh('breakdown','name','商品');
   html += sortableTh('breakdown','box','盒','text-align:right');
   html += sortableTh('breakdown','packet','包','text-align:right');
   html += sortableTh('breakdown','card','張','text-align:right');
-  html += sortableTh('breakdown','cost','成本','text-align:right');
-  html += sortableTh('breakdown','market','現值','text-align:right');
+  html += sortableTh('breakdown','unit_cost','單位成本','text-align:right');
+  html += sortableTh('breakdown','unit_market','單位現價','text-align:right');
+  html += sortableTh('breakdown','cost','總成本','text-align:right');
+  html += sortableTh('breakdown','market','總現值','text-align:right');
   html += sortableTh('breakdown','pl','盈虧','text-align:right');
   html += '</tr></thead><tbody>';
 
   for (const g of rows) {
-    const pl = g.market - g.cost;
+    const pl = g.pl;
     const plCls = pl >= 0 ? 'positive' : 'negative';
     const plSign = pl >= 0 ? '+' : '';
-    html += `<tr><td>${escapeHTML(g.name)}</td><td class="num">${g.box || '—'}</td><td class="num">${g.packet || '—'}</td><td class="num">${g.card || '—'}</td><td class="num">${fmt(g.cost)}</td><td class="num">${fmt(g.market)}</td><td class="num ${plCls}">${plSign}${fmt(pl)}</td></tr>`;
+    const imgUrl = getProductImage(g.name);
+    const clickable = imgUrl
+      ? `<span onclick="showImagePreview('${escapeHTML(g.name).replace(/'/g, "\\'")}','${escapeHTML(imgUrl).replace(/'/g, "\\'")}')" style="cursor:pointer;color:var(--gold);border-bottom:1px dashed var(--gold-dim)" title="點擊查看圖片">${escapeHTML(g.name)}</span>`
+      : escapeHTML(g.name);
+    html += `<tr><td>${clickable}</td><td class="num">${g.box || '—'}</td><td class="num">${g.packet || '—'}</td><td class="num">${g.card || '—'}</td><td class="num">${fmt(g.unit_cost)}</td><td class="num">${fmt(g.unit_market)}</td><td class="num">${fmt(g.cost)}</td><td class="num">${fmt(g.market)}</td><td class="num ${plCls}">${plSign}${fmt(pl)}</td></tr>`;
   }
   html += '</tbody></table></div>';
   host.innerHTML = html;
+}
+
+// 從設定取得商品圖片網址（找完全配對 或 以商品編號為前綴配對）
+function getProductImage(name) {
+  const imgs = state.settings.product_images || {};
+  if (!name) return '';
+  // 完全配對優先
+  if (imgs[name]) return imgs[name];
+  // 例如卡名 "M2 #111" 找 "M2"
+  const firstWord = name.split(' ')[0];
+  if (firstWord && imgs[firstWord]) return imgs[firstWord];
+  return '';
+}
+
+function showImagePreview(name, url) {
+  if (!url) return;
+  document.getElementById('modal-content').innerHTML = `
+    <h3 style="margin-bottom:1rem">${escapeHTML(name)}</h3>
+    <div style="text-align:center">
+      <img src="${escapeHTML(url)}" alt="${escapeHTML(name)}"
+           style="max-width:100%;max-height:70vh;border:1px solid var(--border);border-radius:4px"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+      <div style="display:none;padding:2rem;color:var(--red)">⚠ 圖片無法載入（網址可能失效）</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="closeModal()">關閉</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('show');
 }
 
 function renderPurchases() {
@@ -1388,10 +1430,60 @@ function renderSettings() {
     </div>`;
   };
 
+  const imagesSection = () => {
+    const imgs = state.settings.product_images || {};
+    const products = state.settings.products || [];
+    // 顯示已設定的以及所有商品編號（方便逐個加）
+    const allKeys = Array.from(new Set([...Object.keys(imgs), ...products])).filter(Boolean).sort();
+    if (allKeys.length === 0) {
+      return `<div style="margin-bottom:1.5rem">
+        <h3 style="font-family:var(--font-display);color:var(--text);font-size:1.1rem;margin-bottom:0.4rem">商品圖片</h3>
+        <div style="color:var(--text-dim);font-size:0.85rem;padding:0.5rem">請先新增商品編號</div>
+      </div>`;
+    }
+    const rows = allKeys.map(k => {
+      const url = imgs[k] || '';
+      const hasImg = !!url;
+      return `
+      <li style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0.6rem">
+        <span style="min-width:90px;font-family:var(--font-mono);color:var(--gold);font-size:0.85rem">${escapeHTML(k)}</span>
+        <input type="text" value="${escapeHTML(url)}" placeholder="貼上圖片網址（https://...）"
+               onchange="saveProductImage('${escapeHTML(k).replace(/'/g, "\\'")}', this.value)"
+               style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem 0.6rem;font-family:var(--font-mono);font-size:0.8rem">
+        ${hasImg
+          ? `<button class="btn" style="font-size:0.72rem;padding:0.3rem 0.55rem" onclick="showImagePreview('${escapeHTML(k).replace(/'/g, "\\'")}','${escapeHTML(url).replace(/'/g, "\\'")}')">預覽</button>`
+          : ''}
+      </li>`;
+    }).join('');
+    return `<div style="margin-bottom:1.5rem">
+      <h3 style="font-family:var(--font-display);color:var(--text);font-size:1.1rem;margin-bottom:0.4rem">商品圖片</h3>
+      <div style="color:var(--text-dim);font-size:0.78rem;margin-bottom:0.6rem;line-height:1.6">
+        從 Mercari、蘭苑等網站右鍵「複製圖片網址」後貼上。<br>
+        設定後在儀表板的「按商品分類」表，點商品名可彈出圖片預覽。
+      </div>
+      <ul class="manage-list">${rows}</ul>
+    </div>`;
+  };
+
   host.innerHTML = makeSection('類別', 'categories') +
                    makeSection('商品編號', 'products') +
                    makeSection('購買來源', 'sources') +
-                   ratesSection();
+                   ratesSection() +
+                   imagesSection();
+}
+
+function saveProductImage(key, url) {
+  const trimmed = (url || '').trim();
+  if (!state.settings.product_images) state.settings.product_images = {};
+  if (trimmed === '') {
+    delete state.settings.product_images[key];
+  } else {
+    state.settings.product_images[key] = trimmed;
+  }
+  saveKey('settings', state.settings);
+  // Re-render dashboard to reflect the new image availability
+  renderDashboard();
+  toast(trimmed ? `已更新 ${key} 的圖片` : `已移除 ${key} 的圖片`);
 }
 
 function saveDefaultRate(currency, value) {
@@ -2269,6 +2361,8 @@ window.removeSetting = removeSetting;
 window.updateSetting = updateSetting;
 window.saveDefaultRate = saveDefaultRate;
 window.toggleSort = toggleSort;
+window.showImagePreview = showImagePreview;
+window.saveProductImage = saveProductImage;
 Object.defineProperty(window, 'DEFAULT_RATES', { get: () => DEFAULT_RATES });
 
 function start() {
