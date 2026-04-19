@@ -490,7 +490,7 @@ window.dispatchEvent(new Event('firebase-ready'));
 </script>
 
 <script>
-const DEFAULT_RATES = { HKD: 1, JPY: 0.05, MOP: 0.97, CNY: 0.88, USD: 7.8, TWD: 0.24 };
+let DEFAULT_RATES = { HKD: 1, JPY: 0.05, MOP: 0.97, CNY: 1.14, USD: 7.8, TWD: 0.24 };
 const CURRENCIES = ['HKD', 'JPY', 'MOP', 'CNY', 'USD', 'TWD'];
 const BUY_TYPES = ['盒', '卡包', '單卡'];
 
@@ -499,7 +499,8 @@ const state = {
   settings: {
     categories: ['寶可夢', '海賊王', 'MTG', 'Union Arena', '遊戲王'],
     products: ['M2', 'SV9a', 'SV8', 'CLK', 'ホワイトフレア', 'MEGAドリーム', 'ロケット団', 'ムニキス', 'スペシャルBOX', '散卡', '神の島の冒険'],
-    sources: ['Mercari', 'eBay', '煤炭', '聚龍軒', '直接店鋪', '朋友']
+    sources: ['Mercari', 'eBay', '煤炭', '聚龍軒', '直接店鋪', '朋友'],
+    default_rates: { HKD: 1, JPY: 0.05, MOP: 0.97, CNY: 1.14, USD: 7.8, TWD: 0.24 }
   }
 };
 
@@ -554,8 +555,19 @@ function normalizeSettings(s) {
   return {
     categories: normalizeToArray(s.categories),
     products: normalizeToArray(s.products),
-    sources: normalizeToArray(s.sources)
+    sources: normalizeToArray(s.sources),
+    default_rates: (s.default_rates && typeof s.default_rates === 'object' && !Array.isArray(s.default_rates)) ? s.default_rates : null
   };
+}
+
+function syncDefaultRates() {
+  const r = state.settings.default_rates;
+  if (r && typeof r === 'object') {
+    for (const k of Object.keys(r)) {
+      const n = parseFloat(r[k]);
+      if (Number.isFinite(n)) DEFAULT_RATES[k] = n;
+    }
+  }
 }
 
 function initFirebase(cfg) {
@@ -571,12 +583,13 @@ function initFirebase(cfg) {
       if (key === 'settings') {
         const norm = normalizeSettings(val);
         if (norm) {
-          // Only overwrite keys that have data in Firebase; otherwise keep defaults
           state.settings = {
             categories: norm.categories.length ? norm.categories : state.settings.categories,
             products: norm.products.length ? norm.products : state.settings.products,
-            sources: norm.sources.length ? norm.sources : state.settings.sources
+            sources: norm.sources.length ? norm.sources : state.settings.sources,
+            default_rates: norm.default_rates || state.settings.default_rates
           };
+          syncDefaultRates();
         }
       } else {
         state[key] = normalizeToArray(val);
@@ -781,13 +794,14 @@ function syncPurchaseToInventory(purchase) {
   }
 }
 
-function recalcOpeningCostAllocation(containerType, containerId) {
-  const arr = containerType === 'box' ? state.boxes : state.packets;
-  const container = arr.find(x => x.id === containerId);
-  if (!container || !container.opened_event_id) return;
-  const cards = state.cards.filter(c => c.source_opening_id === container.opened_event_id);
+function recalcOpeningCostAllocation(openingId) {
+  // Sum the cost of ALL containers linked to this opening (boxes + packets)
+  let totalCost = 0;
+  for (const b of state.boxes) if (b.opened_event_id === openingId) totalCost += num(b.cost_hkd);
+  for (const p of state.packets) if (p.opened_event_id === openingId) totalCost += num(p.cost_hkd);
+  const cards = state.cards.filter(c => c.source_opening_id === openingId);
   if (cards.length === 0) return;
-  const per = num(container.cost_hkd) / cards.length;
+  const per = totalCost / cards.length;
   for (const c of cards) if (!c.sold_sale_id) c.cost_hkd = per;
 }
 
@@ -1014,19 +1028,34 @@ function renderOpenings() {
   if (state.openings.length === 0) { host.innerHTML = '<div class="empty-state">尚無開箱記錄</div>'; return; }
   let rows = '', mobile = '';
   for (const o of state.openings) {
-    const container = o.container_type === 'packet'
-      ? state.packets.find(p => p.id === o.container_id)
-      : state.boxes.find(b => b.id === o.container_id);
+    // New format: opening linked via opened_event_id on multiple containers
+    // Old format compat: container_type + container_id on single container
+    let containers = [
+      ...state.boxes.filter(b => b.opened_event_id === o.id),
+      ...state.packets.filter(p => p.opened_event_id === o.id)
+    ];
+    if (containers.length === 0 && o.container_id) {
+      // Fallback to legacy single-container openings
+      const legacy = o.container_type === 'packet'
+        ? state.packets.find(p => p.id === o.container_id)
+        : state.boxes.find(b => b.id === o.container_id);
+      if (legacy) containers = [legacy];
+    }
+
     const cards = state.cards.filter(c => c.source_opening_id === o.id);
-    const containerLabel = container
-      ? `[${o.container_type === 'packet' ? '包' : '盒'}] ${container.product}`
-      : '(容器已刪除)';
+    const totalCost = containers.reduce((s, c) => s + num(c.cost_hkd), 0);
+    const kindLabel = containers[0] ? (state.packets.includes(containers[0]) ? '包' : '盒') : (o.container_kind === 'packet' ? '包' : '盒');
+    const product = o.product || containers[0]?.product || '(未命名)';
+    const containerLabel = containers.length > 0
+      ? `[${kindLabel}] ${product} × ${containers.length}`
+      : '(來源已刪除)';
     const cardsLabel = cards.map(c => `${c.card_name || '(未命名)'}${c.card_number ? ' ' + c.card_number : ''}`).join(' · ') || '(未記錄)';
-    const per = cards.length > 0 && container ? num(container.cost_hkd) / cards.length : 0;
+    const per = cards.length > 0 ? totalCost / cards.length : 0;
+
     rows += `<tr>
       <td style="padding:0.55rem 0.7rem">${escapeHTML(o.date)}</td>
       <td style="padding:0.55rem 0.7rem">${escapeHTML(containerLabel)}</td>
-      <td class="computed">${fmt(container ? container.cost_hkd : 0)}</td>
+      <td class="computed">${fmt(totalCost)}</td>
       <td style="padding:0.55rem 0.7rem;text-align:center">${cards.length}</td>
       <td class="computed">${cards.length ? fmt(per) : '—'}</td>
       <td style="padding:0.55rem 0.7rem">${escapeHTML(cardsLabel)}</td>
@@ -1041,7 +1070,7 @@ function renderOpenings() {
         <div class="mobile-card-meta">${escapeHTML(o.date)}</div>
       </div>
       <div class="mobile-card-grid">
-        <div class="mobile-card-field"><label>盒成本 HKD</label><div class="computed-val">${fmt(container ? container.cost_hkd : 0)}</div></div>
+        <div class="mobile-card-field"><label>總成本 HKD</label><div class="computed-val">${fmt(totalCost)}</div></div>
         <div class="mobile-card-field"><label>已抽張數</label><div class="computed-val">${cards.length}</div></div>
         <div class="mobile-card-field full"><label>每張分攤 HKD</label><div class="computed-val">${cards.length ? fmt(per) : '—'}</div></div>
         <div class="mobile-card-field full"><label>抽到的卡</label><div class="computed-val" style="text-align:left;font-family:inherit;font-size:0.78rem">${escapeHTML(cardsLabel)}</div></div>
@@ -1053,7 +1082,7 @@ function renderOpenings() {
     </div>`;
   }
   host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
-    <th>開箱日</th><th>來源</th><th>成本 HKD</th><th>已抽</th><th>每張分攤</th><th>抽到的卡</th><th></th>
+    <th>開箱日</th><th>來源</th><th>總成本 HKD</th><th>已抽</th><th>每張分攤</th><th>抽到的卡</th><th></th>
   </tr></thead><tbody>${rows}</tbody></table></div>
   <div class="mobile-cards">${mobile}</div>`;
 }
@@ -1120,9 +1149,43 @@ function renderSettings() {
       </div>
     </div>`;
   };
+
+  const ratesSection = () => {
+    const rates = state.settings.default_rates || DEFAULT_RATES;
+    const rows = CURRENCIES.map(cur => `
+      <li style="display:flex;align-items:center;gap:0.7rem;padding:0.5rem 0.7rem">
+        <span style="min-width:50px;font-family:var(--font-mono);color:var(--gold)">${cur}</span>
+        <span style="color:var(--text-dim);font-size:0.8rem">1 ${cur} =</span>
+        <input type="number" step="0.0001" value="${num(rates[cur])}"
+               onchange="saveDefaultRate('${cur}', this.value)"
+               ${cur === 'HKD' ? 'disabled' : ''}
+               style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem 0.6rem;font-family:var(--font-mono);font-size:0.88rem;text-align:right">
+        <span style="color:var(--text-dim);font-size:0.8rem">HKD</span>
+      </li>`).join('');
+    return `<div style="margin-bottom:1.5rem">
+      <h3 style="font-family:var(--font-display);color:var(--text);font-size:1.1rem;margin-bottom:0.4rem">預設匯率</h3>
+      <div style="color:var(--text-dim);font-size:0.78rem;margin-bottom:0.6rem;line-height:1.6">
+        新增買入或銷售時，選到對應貨幣會自動帶這個匯率。<br>
+        <strong style="color:var(--gold-dim)">修改這裡不會影響已有記錄的匯率</strong>（每筆買入／銷售會保留當時的匯率）。
+      </div>
+      <ul class="manage-list">${rows}</ul>
+    </div>`;
+  };
+
   host.innerHTML = makeSection('類別', 'categories') +
                    makeSection('商品編號', 'products') +
-                   makeSection('購買來源', 'sources');
+                   makeSection('購買來源', 'sources') +
+                   ratesSection();
+}
+
+function saveDefaultRate(currency, value) {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n) || n <= 0) { toast('匯率必須大於 0', true); renderSettings(); return; }
+  if (!state.settings.default_rates) state.settings.default_rates = {};
+  state.settings.default_rates[currency] = n;
+  syncDefaultRates();
+  saveKey('settings', state.settings);
+  toast(`已更新 ${currency} 預設匯率為 ${n}`);
 }
 
 function addSetting(key) {
@@ -1291,67 +1354,145 @@ function addCardManually() {
   last?.querySelector('input[data-field="card_name"]')?.focus();
 }
 
+// 聚合：依 (product, type) 統計持有中數量，並取得最舊買入日期供排序
+function groupHeldByProduct(kind) {
+  const arr = kind === 'box' ? state.boxes : state.packets;
+  const statusFn = kind === 'box' ? boxStatus : packetStatus;
+  const map = {};
+  for (const item of arr) {
+    if (statusFn(item) !== 'held') continue;
+    const product = item.product || '(未命名)';
+    if (!map[product]) map[product] = { items: [], oldestDate: '9999-12-31' };
+    map[product].items.push(item);
+    const p = state.purchases.find(x => x.id === item.purchase_id);
+    if (p && p.date && p.date < map[product].oldestDate) map[product].oldestDate = p.date;
+  }
+  return map;
+}
+
+// FIFO 挑選持有中的盒/包：優先舊的買入
+function pickOldestHeld(kind, product, count) {
+  const arr = kind === 'box' ? state.boxes : state.packets;
+  const statusFn = kind === 'box' ? boxStatus : packetStatus;
+  const candidates = arr.filter(item =>
+    statusFn(item) === 'held' && (item.product || '(未命名)') === product
+  );
+  // Sort by purchase date (oldest first); fallback to creation order
+  candidates.sort((a, b) => {
+    const pa = state.purchases.find(x => x.id === a.purchase_id);
+    const pb = state.purchases.find(x => x.id === b.purchase_id);
+    const da = pa?.date || '';
+    const db = pb?.date || '';
+    if (da !== db) return da < db ? -1 : 1;
+    return 0;
+  });
+  return candidates.slice(0, count);
+}
+
 function showOpenBoxModal() {
-  const heldBoxes = state.boxes.filter(b => boxStatus(b) === 'held');
-  const heldPackets = state.packets.filter(p => packetStatus(p) === 'held');
-  if (heldBoxes.length === 0 && heldPackets.length === 0) { toast('沒有可開的盒或卡包'); return; }
-  const boxOpts = heldBoxes.map(b => `<option value="box:${b.id}">[盒] ${escapeHTML(b.product)} (成本 ${fmt(b.cost_hkd)})</option>`).join('');
-  const packetOpts = heldPackets.map(p => `<option value="packet:${p.id}">[包] ${escapeHTML(p.product)} (成本 ${fmt(p.cost_hkd)})</option>`).join('');
+  const boxGroups = groupHeldByProduct('box');
+  const packetGroups = groupHeldByProduct('packet');
+  const allGroups = [];
+  for (const [p, g] of Object.entries(boxGroups)) allGroups.push({ kind: 'box', product: p, count: g.items.length });
+  for (const [p, g] of Object.entries(packetGroups)) allGroups.push({ kind: 'packet', product: p, count: g.items.length });
+
+  if (allGroups.length === 0) { toast('沒有可開的盒或卡包'); return; }
+
+  const opts = allGroups.map(g =>
+    `<option value="${g.kind}:${escapeHTML(g.product)}" data-max="${g.count}">[${g.kind === 'box' ? '盒' : '包'}] ${escapeHTML(g.product)}（持有 ${g.count}）</option>`
+  ).join('');
+
   document.getElementById('modal-content').innerHTML = `
     <h3>新增開箱</h3>
     <div class="modal-field"><label>日期</label><input type="date" id="op-date" value="${todayISO()}"></div>
-    <div class="modal-field"><label>選擇要開的</label><select id="op-container">${boxOpts}${packetOpts}</select></div>
-    <div class="modal-field"><label>抽到的好卡（每行一張，格式：卡名 卡編號）</label>
+    <div class="modal-field">
+      <label>選擇商品</label>
+      <select id="op-product" onchange="updateOpenMax()">${opts}</select>
+    </div>
+    <div class="modal-field">
+      <label>開幾個？<span id="op-max" style="color:var(--text-dim);font-size:0.8rem;margin-left:0.5rem"></span></label>
+      <input type="number" id="op-qty" min="1" value="1" step="1">
+      <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">系統會自動挑買入日期最舊的項目</div>
+    </div>
+    <div class="modal-field">
+      <label>抽到的好卡（每行一張，格式：卡名 卡編號）</label>
       <textarea id="op-cards" rows="4" placeholder="例如：&#10;藍噴火龍 #106&#10;&#10;空白也 OK，之後可追加"></textarea>
     </div>
-    <div class="modal-field" style="font-size:0.75rem;color:var(--text-dim)">成本會平均分攤到所有卡。追加時自動重算。</div>
+    <div class="modal-field" style="font-size:0.75rem;color:var(--text-dim)">所有盒/包的總成本會平均分攤到所有抽到的卡。追加卡時自動重算。</div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">取消</button>
       <button class="btn btn-primary" onclick="confirmOpenBox()">確認</button>
     </div>`;
   document.getElementById('modal-backdrop').classList.add('show');
+  updateOpenMax();
+}
+
+function updateOpenMax() {
+  const sel = document.getElementById('op-product');
+  const opt = sel.options[sel.selectedIndex];
+  const max = opt ? Number(opt.dataset.max) : 1;
+  const qtyEl = document.getElementById('op-qty');
+  qtyEl.max = max;
+  if (num(qtyEl.value) > max) qtyEl.value = max;
+  document.getElementById('op-max').textContent = `最多 ${max} 個`;
 }
 
 function confirmOpenBox() {
   const date = document.getElementById('op-date').value;
-  const [ct, cid] = document.getElementById('op-container').value.split(':');
+  const [kind, product] = document.getElementById('op-product').value.split(':');
+  const qty = Math.max(1, Math.floor(num(document.getElementById('op-qty').value)));
   const text = document.getElementById('op-cards').value.trim();
-  const container = ct === 'box' ? state.boxes.find(b => b.id === cid) : state.packets.find(p => p.id === cid);
-  if (!container) { toast('找不到容器', true); return; }
-  const lines = text ? text.split('\n').map(s => s.trim()).filter(Boolean) : [];
-  const opening = { id: uuid(), date, container_type: ct, container_id: cid };
+
+  const picked = pickOldestHeld(kind, product, qty);
+  if (picked.length === 0) { toast('找不到可開的項目', true); return; }
+  if (picked.length < qty) { toast(`只有 ${picked.length} 個可開`, true); return; }
+
+  const opening = { id: uuid(), date, container_kind: kind, product };
   state.openings.push(opening);
+
+  const lines = text ? text.split('\n').map(s => s.trim()).filter(Boolean) : [];
   for (const line of lines) {
     let cardName = line, cardNumber = '';
     const m = line.match(/^(.+?)\s+(\S+)$/);
     if (m && (m[2].startsWith('#') || /\d/.test(m[2]))) { cardName = m[1].trim(); cardNumber = m[2]; }
     state.cards.push({
       id: uuid(), source_purchase_id: null, source_opening_id: opening.id,
-      card_name: cardName, box_code: container.product || '', card_number: cardNumber,
-      category: container.category || '', cost_hkd: 0, market_price_hkd: 0,
+      card_name: cardName, box_code: product || '', card_number: cardNumber,
+      category: picked[0].category || '', cost_hkd: 0, market_price_hkd: 0,
       sold_sale_id: null, note: `開箱於 ${date}`
     });
   }
-  container.opened_event_id = opening.id;
-  recalcOpeningCostAllocation(ct, cid);
+
+  // Mark all picked containers as opened
+  for (const c of picked) c.opened_event_id = opening.id;
+
+  recalcOpeningCostAllocation(opening.id);
+
   saveKey('openings', state.openings);
-  if (ct === 'box') saveKey('boxes', state.boxes); else saveKey('packets', state.packets);
+  saveKey('boxes', state.boxes);
+  saveKey('packets', state.packets);
   saveKey('cards', state.cards);
   closeModal();
   renderAll();
-  toast(`已開箱，新增 ${lines.length} 張`);
+  toast(`已開 ${picked.length} 個 ${product}，新增 ${lines.length} 張卡`);
 }
 
 function showAddCardsToOpeningModal(id) {
   const o = state.openings.find(x => x.id === id);
   if (!o) return;
-  const container = o.container_type === 'packet' ? state.packets.find(p => p.id === o.container_id) : state.boxes.find(b => b.id === o.container_id);
-  if (!container) { toast('容器不存在', true); return; }
+  const containers = [
+    ...state.boxes.filter(b => b.opened_event_id === id),
+    ...state.packets.filter(p => p.opened_event_id === id)
+  ];
+  if (containers.length === 0) { toast('來源已不存在', true); return; }
+  const totalCost = containers.reduce((s, c) => s + num(c.cost_hkd), 0);
+  const product = o.product || containers[0]?.product || '(未命名)';
   const current = state.cards.filter(c => c.source_opening_id === id).length;
+
   document.getElementById('modal-content').innerHTML = `
     <h3>追加抽到的卡</h3>
     <div class="modal-field" style="font-size:0.85rem;color:var(--text-dim)">
-      來源：${escapeHTML(container.product)}（成本 HKD ${fmt(container.cost_hkd)}）· 目前 ${current} 張
+      來源：${escapeHTML(product)} × ${containers.length}（總成本 HKD ${fmt(totalCost)}）· 目前 ${current} 張
     </div>
     <div class="modal-field"><label>追加（每行一張）</label><textarea id="add-cards" rows="4" placeholder="卡名 #編號"></textarea></div>
     <div class="modal-field" style="font-size:0.75rem;color:var(--text-dim)">追加後重新分攤成本。</div>
@@ -1365,23 +1506,25 @@ function showAddCardsToOpeningModal(id) {
 function confirmAddCards(id) {
   const o = state.openings.find(x => x.id === id);
   if (!o) return;
-  const container = o.container_type === 'packet' ? state.packets.find(p => p.id === o.container_id) : state.boxes.find(b => b.id === o.container_id);
-  if (!container) return;
+  const firstContainer = state.boxes.find(b => b.opened_event_id === id)
+    || state.packets.find(p => p.opened_event_id === id);
   const text = document.getElementById('add-cards').value.trim();
   if (!text) { toast('沒有輸入'); return; }
   const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
+  const product = o.product || firstContainer?.product || '';
+  const category = firstContainer?.category || '';
   for (const line of lines) {
     let cardName = line, cardNumber = '';
     const m = line.match(/^(.+?)\s+(\S+)$/);
     if (m && (m[2].startsWith('#') || /\d/.test(m[2]))) { cardName = m[1].trim(); cardNumber = m[2]; }
     state.cards.push({
       id: uuid(), source_purchase_id: null, source_opening_id: id,
-      card_name: cardName, box_code: container.product || '', card_number: cardNumber,
-      category: container.category || '', cost_hkd: 0, market_price_hkd: 0,
+      card_name: cardName, box_code: product || '', card_number: cardNumber,
+      category, cost_hkd: 0, market_price_hkd: 0,
       sold_sale_id: null, note: `追加於 ${todayISO()}`
     });
   }
-  recalcOpeningCostAllocation(o.container_type, o.container_id);
+  recalcOpeningCostAllocation(id);
   saveKey('cards', state.cards);
   closeModal();
   renderAll();
@@ -1393,11 +1536,13 @@ function deleteOpening(id) {
   if (!o) return;
   const cards = state.cards.filter(c => c.source_opening_id === id);
   if (cards.some(c => c.sold_sale_id)) { toast('有已售卡不可刪', true); return; }
-  if (!confirm(`刪除？將移除 ${cards.length} 張`)) return;
+  const containers = [
+    ...state.boxes.filter(b => b.opened_event_id === id),
+    ...state.packets.filter(p => p.opened_event_id === id)
+  ];
+  if (!confirm(`刪除此開箱？將移除 ${cards.length} 張卡，恢復 ${containers.length} 個容器為持有`)) return;
   state.cards = state.cards.filter(c => c.source_opening_id !== id);
-  const arr = o.container_type === 'packet' ? state.packets : state.boxes;
-  const c = arr.find(x => x.opened_event_id === id);
-  if (c) c.opened_event_id = null;
+  for (const c of containers) c.opened_event_id = null;
   state.openings = state.openings.filter(x => x.id !== id);
   saveKey('openings', state.openings);
   saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
@@ -1405,22 +1550,38 @@ function deleteOpening(id) {
 }
 
 function showSellModal() {
-  const hB = state.boxes.filter(b => boxStatus(b) === 'held');
-  const hP = state.packets.filter(p => packetStatus(p) === 'held');
+  const boxGroups = groupHeldByProduct('box');
+  const packetGroups = groupHeldByProduct('packet');
   const hC = state.cards.filter(c => cardStatus(c) === 'held');
-  const hasInv = hB.length + hP.length + hC.length > 0;
+  const boxGroupList = Object.entries(boxGroups);
+  const packetGroupList = Object.entries(packetGroups);
+  const hasInv = boxGroupList.length + packetGroupList.length + hC.length > 0;
 
-  const mkRow = (key, label, cost) => `
+  // Group row (boxes / packets): show quantity selector
+  const mkGroupRow = (kind, product, group) => {
+    const unitCost = group.items.reduce((s, x) => s + num(x.cost_hkd), 0) / group.items.length;
+    return `
     <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.55rem;border-bottom:1px solid var(--border-soft);cursor:pointer">
-      <input type="checkbox" class="sl-check" data-key="${key}" data-cost="${cost}" style="width:auto;accent-color:var(--gold)">
-      <span style="flex:1;font-size:0.85rem">${label}</span>
-      <span style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim)">${fmt(cost)}</span>
-      <input type="number" class="sl-item-price" data-key="${key}" step="0.01" placeholder="金額" style="width:90px;display:none;font-family:var(--font-mono);font-size:0.8rem;padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">
+      <input type="checkbox" class="sl-check" data-kind="group" data-group-kind="${kind}" data-product="${escapeHTML(product)}" data-unit-cost="${unitCost}" data-max="${group.items.length}" style="width:auto;accent-color:var(--gold)">
+      <span style="flex:1;font-size:0.85rem">[${kind === 'box' ? '盒' : '包'}] ${escapeHTML(product)} <span style="color:var(--text-dim);font-size:0.78rem">(持有 ${group.items.length})</span></span>
+      <input type="number" class="sl-qty" min="1" max="${group.items.length}" value="1" style="width:55px;font-family:var(--font-mono);font-size:0.78rem;padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-align:right">
+      <span style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim);min-width:60px;text-align:right">${fmt(unitCost)}/個</span>
+      <input type="number" class="sl-item-price" step="0.01" placeholder="金額" style="width:90px;display:none;font-family:var(--font-mono);font-size:0.8rem;padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">
+    </label>`;
+  };
+
+  // Card row: individual
+  const mkCardRow = (card) => `
+    <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.55rem;border-bottom:1px solid var(--border-soft);cursor:pointer">
+      <input type="checkbox" class="sl-check" data-kind="card" data-card-id="${card.id}" data-unit-cost="${num(card.cost_hkd)}" style="width:auto;accent-color:var(--gold)">
+      <span style="flex:1;font-size:0.85rem">[卡] ${escapeHTML(card.card_name || card.card_number || '(未命名)')}${card.card_number && card.card_name ? ' <span style="color:var(--text-dim)">' + escapeHTML(card.card_number) + '</span>' : ''}</span>
+      <span style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim)">${fmt(card.cost_hkd)}</span>
+      <input type="number" class="sl-item-price" step="0.01" placeholder="金額" style="width:90px;display:none;font-family:var(--font-mono);font-size:0.8rem;padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">
     </label>`;
 
-  const bo = hB.map(b => mkRow('box:' + b.id, `[盒] ${escapeHTML(b.product)}`, b.cost_hkd)).join('');
-  const po = hP.map(p => mkRow('packet:' + p.id, `[包] ${escapeHTML(p.product)}`, p.cost_hkd)).join('');
-  const co = hC.map(c => mkRow('card:' + c.id, `[卡] ${escapeHTML(c.card_name || c.card_number || '(未命名)')}`, c.cost_hkd)).join('');
+  const bo = boxGroupList.map(([p, g]) => mkGroupRow('box', p, g)).join('');
+  const po = packetGroupList.map(([p, g]) => mkGroupRow('packet', p, g)).join('');
+  const co = hC.map(c => mkCardRow(c)).join('');
   const cur = CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('');
 
   document.getElementById('modal-content').innerHTML = `
@@ -1452,7 +1613,8 @@ function showSellModal() {
         </div>
       </div>
       <div class="modal-field">
-        <label>選擇要賣的項目（可複選）</label>
+        <label>選擇要賣的項目</label>
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:0.3rem">盒/包可設定數量（系統自動從舊到新扣除）· 單卡逐張勾選</div>
         <div style="border:1px solid var(--border);background:var(--bg);max-height:280px;overflow-y:auto">${hasInv ? (bo+po+co) : '<div style="padding:1rem;color:var(--text-dim);text-align:center">目前沒有可售的庫存</div>'}</div>
       </div>
     </div>
@@ -1470,8 +1632,8 @@ function showSellModal() {
     </div>
 
     <div class="modal-field" style="display:flex;gap:0.5rem">
-      <div style="flex:1"><label>貨幣</label><select id="sl-currency" onchange="document.getElementById('sl-rate').value = (({HKD:1,JPY:0.05,MOP:0.97,CNY:0.88,USD:7.8,TWD:0.24})[this.value] || 1)">${cur}</select></div>
-      <div style="flex:1"><label>匯率</label><input type="number" id="sl-rate" step="0.0001" value="0.97"></div>
+      <div style="flex:1"><label>貨幣</label><select id="sl-currency" onchange="document.getElementById('sl-rate').value = (DEFAULT_RATES[this.value] || 1)">${cur}</select></div>
+      <div style="flex:1"><label>匯率</label><input type="number" id="sl-rate" step="0.0001" value="${DEFAULT_RATES.MOP}"></div>
     </div>
 
     <div class="modal-field" id="sl-lump-field" style="${hasInv ? '' : 'display:none'}">
@@ -1479,7 +1641,7 @@ function showSellModal() {
       <input type="number" id="sl-amount" step="0.01" value="0">
       <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem" id="sl-lump-hint">按成本比例自動分攤到各項</div>
     </div>
-    <div class="modal-field" id="sl-each-field" style="display:none;font-size:0.72rem;color:var(--text-dim)">勾選後右側會出現輸入框，分別填每項的金額</div>
+    <div class="modal-field" id="sl-each-field" style="display:none;font-size:0.72rem;color:var(--text-dim)">勾選後右側會出現輸入框，分別填每項的金額（金額為該項×數量的總額）</div>
 
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">取消</button>
@@ -1555,45 +1717,86 @@ function confirmSell() {
   const checked = Array.from(document.querySelectorAll('.sl-check:checked'));
   if (checked.length === 0) { toast('請至少選一個項目', true); return; }
 
-  const items = checked.map(el => ({ key: el.dataset.key, cost: num(el.dataset.cost) }));
+  // Expand each checked row into concrete targets
+  // For group rows (box/packet): pick N oldest items from that product
+  // For card rows: single target
+  const selections = []; // each: { targets: [{type, id, cost}], unitPriceEl, label }
+  for (const el of checked) {
+    const row = el.closest('label');
+    const priceEl = row.querySelector('.sl-item-price');
+    if (el.dataset.kind === 'group') {
+      const kind = el.dataset.groupKind; // 'box' or 'packet'
+      const product = el.dataset.product;
+      const qtyEl = row.querySelector('.sl-qty');
+      const qty = Math.max(1, Math.floor(num(qtyEl?.value || 1)));
+      const picked = pickOldestHeld(kind, product, qty);
+      if (picked.length < qty) {
+        toast(`${product} 只有 ${picked.length} 個可售`, true);
+        return;
+      }
+      selections.push({
+        targets: picked.map(p => ({ type: kind, id: p.id, cost: num(p.cost_hkd) })),
+        unitPriceEl: priceEl,
+        label: `${kind === 'box' ? '盒' : '包'} ${product} ×${qty}`
+      });
+    } else if (el.dataset.kind === 'card') {
+      const cardId = el.dataset.cardId;
+      const card = state.cards.find(c => c.id === cardId);
+      if (!card) continue;
+      selections.push({
+        targets: [{ type: 'card', id: cardId, cost: num(card.cost_hkd) }],
+        unitPriceEl: priceEl,
+        label: `卡 ${card.card_name || card.card_number || ''}`
+      });
+    }
+  }
 
-  let itemAmounts = [];
+  // Flat list of all individual targets
+  const allTargets = selections.flatMap(s => s.targets);
+  if (allTargets.length === 0) { toast('沒有項目可賣', true); return; }
+
+  // Calculate amount_local per target
+  const targetAmounts = []; // { type, id, amount_local }
   if (mode === 'lump') {
     const total = num(document.getElementById('sl-amount').value);
     if (total <= 0) { toast('請輸入總金額', true); return; }
-    const totalCost = items.reduce((s, x) => s + x.cost, 0);
+    const totalCost = allTargets.reduce((s, t) => s + t.cost, 0);
     if (totalCost <= 0) {
-      const per = total / items.length;
-      itemAmounts = items.map(x => ({ ...x, amount_local: per }));
+      const per = total / allTargets.length;
+      for (const t of allTargets) targetAmounts.push({ ...t, amount_local: per });
     } else {
-      itemAmounts = items.map(x => ({ ...x, amount_local: total * (x.cost / totalCost) }));
+      for (const t of allTargets) targetAmounts.push({ ...t, amount_local: total * (t.cost / totalCost) });
     }
   } else {
-    for (const x of items) {
-      const el = document.querySelector(`.sl-item-price[data-key="${x.key}"]`);
-      const v = num(el.value);
-      if (v <= 0) { toast('所有選中項目都要填金額', true); return; }
-      itemAmounts.push({ ...x, amount_local: v });
+    // each-price mode: per selection row
+    for (const sel of selections) {
+      const v = num(sel.unitPriceEl?.value || 0);
+      if (v <= 0) { toast(`「${sel.label}」未填金額`, true); return; }
+      // Split across targets within this selection by cost ratio (or evenly)
+      const selCost = sel.targets.reduce((s, t) => s + t.cost, 0);
+      for (const t of sel.targets) {
+        const share = selCost > 0 ? v * (t.cost / selCost) : v / sel.targets.length;
+        targetAmounts.push({ ...t, amount_local: share });
+      }
     }
   }
 
   let totalHKD = 0;
-  for (const x of itemAmounts) {
-    const [it, id] = x.key.split(':');
-    const amountHKD = x.amount_local * rate;
+  for (const t of targetAmounts) {
+    const amountHKD = t.amount_local * rate;
     totalHKD += amountHKD;
-    const sale = { id: uuid(), date, item_type: it, item_id: id, currency, rate, amount_local: x.amount_local, amount_hkd: amountHKD };
+    const sale = { id: uuid(), date, item_type: t.type, item_id: t.id, currency, rate, amount_local: t.amount_local, amount_hkd: amountHKD };
     state.sales.push(sale);
-    if (it === 'box') { const b = state.boxes.find(y => y.id === id); if (b) b.sold_sale_id = sale.id; }
-    else if (it === 'packet') { const p = state.packets.find(y => y.id === id); if (p) p.sold_sale_id = sale.id; }
-    else if (it === 'card') { const c = state.cards.find(y => y.id === id); if (c) c.sold_sale_id = sale.id; }
+    if (t.type === 'box') { const b = state.boxes.find(x => x.id === t.id); if (b) b.sold_sale_id = sale.id; }
+    else if (t.type === 'packet') { const p = state.packets.find(x => x.id === t.id); if (p) p.sold_sale_id = sale.id; }
+    else if (t.type === 'card') { const c = state.cards.find(x => x.id === t.id); if (c) c.sold_sale_id = sale.id; }
   }
 
   saveKey('sales', state.sales);
   saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
   closeModal();
   renderAll();
-  toast(`已記錄 ${itemAmounts.length} 筆銷售 · 總 ${fmt(totalHKD)} HKD`);
+  toast(`已記錄 ${targetAmounts.length} 筆銷售 · 總 ${fmt(totalHKD)} HKD`);
 }
 
 function deleteSale(id) {
@@ -1743,6 +1946,7 @@ window.deleteCard = deleteCard;
 window.addCardManually = addCardManually;
 window.showOpenBoxModal = showOpenBoxModal;
 window.confirmOpenBox = confirmOpenBox;
+window.updateOpenMax = updateOpenMax;
 window.showAddCardsToOpeningModal = showAddCardsToOpeningModal;
 window.confirmAddCards = confirmAddCards;
 window.deleteOpening = deleteOpening;
@@ -1761,6 +1965,8 @@ window.showImportModal = showImportModal;
 window.confirmImport = confirmImport;
 window.addSetting = addSetting;
 window.removeSetting = removeSetting;
+window.saveDefaultRate = saveDefaultRate;
+Object.defineProperty(window, 'DEFAULT_RATES', { get: () => DEFAULT_RATES });
 
 function start() {
   const cfgText = localStorage.getItem('memi_firebase_config');
