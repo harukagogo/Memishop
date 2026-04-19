@@ -538,6 +538,26 @@ function resetFirebaseConfig() {
   location.reload();
 }
 
+function normalizeToArray(v) {
+  if (Array.isArray(v)) return v.filter(x => x != null);
+  if (v && typeof v === 'object') {
+    return Object.keys(v)
+      .sort((a, b) => Number(a) - Number(b))
+      .map(k => v[k])
+      .filter(x => x != null);
+  }
+  return [];
+}
+
+function normalizeSettings(s) {
+  if (!s || typeof s !== 'object') return null;
+  return {
+    categories: normalizeToArray(s.categories),
+    products: normalizeToArray(s.products),
+    sources: normalizeToArray(s.sources)
+  };
+}
+
 function initFirebase(cfg) {
   const { initializeApp, getDatabase, ref, onValue, set } = window.firebaseImports;
   firebaseApp = initializeApp(cfg);
@@ -549,9 +569,17 @@ function initFirebase(cfg) {
       const val = snapshot.val();
       isApplyingRemote = true;
       if (key === 'settings') {
-        if (val) state.settings = { ...state.settings, ...val };
+        const norm = normalizeSettings(val);
+        if (norm) {
+          // Only overwrite keys that have data in Firebase; otherwise keep defaults
+          state.settings = {
+            categories: norm.categories.length ? norm.categories : state.settings.categories,
+            products: norm.products.length ? norm.products : state.settings.products,
+            sources: norm.sources.length ? norm.sources : state.settings.sources
+          };
+        }
       } else {
-        state[key] = val || [];
+        state[key] = normalizeToArray(val);
       }
       isApplyingRemote = false;
       refreshDataLists();
@@ -654,7 +682,12 @@ function computeTotals() {
     if (st === 'held') { cardInvCost += num(c.cost_hkd); cardInvMarket += num(c.market_price_hkd); cardInvCount++; }
     else if (st === 'sold') { const s = state.sales.find(x => x.id === c.sold_sale_id); if (s) realizedPL += num(s.amount_hkd) - num(c.cost_hkd); }
   }
-  for (const s of state.sales) saleTotal += num(s.amount_hkd);
+  for (const s of state.sales) {
+    saleTotal += num(s.amount_hkd);
+    if (s.item_type === 'other') {
+      realizedPL += num(s.amount_hkd) - num(s.cost_hkd_manual);
+    }
+  }
 
   const invCost = boxInvCost + packetInvCost + cardInvCost;
   const invMarket = boxInvMarket + packetInvMarket + cardInvMarket;
@@ -1035,6 +1068,7 @@ function renderSales() {
     if (s.item_type === 'box') { const b = state.boxes.find(x => x.id === s.item_id); itemLabel = b ? `[盒] ${b.product}` : '[盒] (已刪除)'; cost = b ? num(b.cost_hkd) : 0; }
     else if (s.item_type === 'packet') { const p = state.packets.find(x => x.id === s.item_id); itemLabel = p ? `[包] ${p.product}` : '[包] (已刪除)'; cost = p ? num(p.cost_hkd) : 0; }
     else if (s.item_type === 'card') { const c = state.cards.find(x => x.id === s.item_id); itemLabel = c ? `[卡] ${c.card_name}${c.card_number ? ' ' + c.card_number : ''}` : '[卡] (已刪除)'; cost = c ? num(c.cost_hkd) : 0; }
+    else if (s.item_type === 'other') { itemLabel = `[其他] ${s.description || '(無說明)'}`; cost = num(s.cost_hkd_manual); }
     const pl = num(s.amount_hkd) - cost;
     const plCls = pl >= 0 ? 'positive' : 'negative';
     const plSign = pl >= 0 ? '+' : '';
@@ -1374,7 +1408,7 @@ function showSellModal() {
   const hB = state.boxes.filter(b => boxStatus(b) === 'held');
   const hP = state.packets.filter(p => packetStatus(p) === 'held');
   const hC = state.cards.filter(c => cardStatus(c) === 'held');
-  if (hB.length + hP.length + hC.length === 0) { toast('沒有可售庫存'); return; }
+  const hasInv = hB.length + hP.length + hC.length > 0;
 
   const mkRow = (key, label, cost) => `
     <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.55rem;border-bottom:1px solid var(--border-soft);cursor:pointer">
@@ -1386,33 +1420,67 @@ function showSellModal() {
 
   const bo = hB.map(b => mkRow('box:' + b.id, `[盒] ${escapeHTML(b.product)}`, b.cost_hkd)).join('');
   const po = hP.map(p => mkRow('packet:' + p.id, `[包] ${escapeHTML(p.product)}`, p.cost_hkd)).join('');
-  const co = hC.map(c => mkRow('card:' + c.id, `[卡] ${escapeHTML(c.card_name)}${c.card_number ? ' ' + escapeHTML(c.card_number) : ''}`, c.cost_hkd)).join('');
+  const co = hC.map(c => mkRow('card:' + c.id, `[卡] ${escapeHTML(c.card_name || c.card_number || '(未命名)')}`, c.cost_hkd)).join('');
   const cur = CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('');
 
   document.getElementById('modal-content').innerHTML = `
     <h3>新增銷售</h3>
-    <div class="modal-field"><label>日期</label><input type="date" id="sl-date" value="${todayISO()}"></div>
     <div class="modal-field">
-      <label>計價模式</label>
+      <label>銷售類型</label>
       <div style="display:flex;gap:0.5rem">
         <label style="flex:1;display:flex;align-items:center;gap:0.4rem;padding:0.5rem;border:1px solid var(--border);cursor:pointer;border-radius:4px">
-          <input type="radio" name="sl-mode" value="lump" checked onchange="updateSellMode()" style="accent-color:var(--gold)"> 整批一個金額
+          <input type="radio" name="sl-type" value="inv" ${hasInv ? 'checked' : ''} ${hasInv ? '' : 'disabled'} onchange="updateSellType()" style="accent-color:var(--gold)"> 從庫存選
         </label>
         <label style="flex:1;display:flex;align-items:center;gap:0.4rem;padding:0.5rem;border:1px solid var(--border);cursor:pointer;border-radius:4px">
-          <input type="radio" name="sl-mode" value="each" onchange="updateSellMode()" style="accent-color:var(--gold)"> 各項自訂價
+          <input type="radio" name="sl-type" value="other" ${hasInv ? '' : 'checked'} onchange="updateSellType()" style="accent-color:var(--gold)"> 其他（散卡等）
         </label>
       </div>
     </div>
-    <div class="modal-field">
-      <label>選擇要賣的項目（可複選）</label>
-      <div style="border:1px solid var(--border);background:var(--bg);max-height:280px;overflow-y:auto">${bo}${po}${co}</div>
+
+    <div class="modal-field"><label>日期</label><input type="date" id="sl-date" value="${todayISO()}"></div>
+
+    <div id="sl-inv-block" style="${hasInv ? '' : 'display:none'}">
+      <div class="modal-field">
+        <label>計價模式</label>
+        <div style="display:flex;gap:0.5rem">
+          <label style="flex:1;display:flex;align-items:center;gap:0.4rem;padding:0.5rem;border:1px solid var(--border);cursor:pointer;border-radius:4px">
+            <input type="radio" name="sl-mode" value="lump" checked onchange="updateSellMode()" style="accent-color:var(--gold)"> 整批一個金額
+          </label>
+          <label style="flex:1;display:flex;align-items:center;gap:0.4rem;padding:0.5rem;border:1px solid var(--border);cursor:pointer;border-radius:4px">
+            <input type="radio" name="sl-mode" value="each" onchange="updateSellMode()" style="accent-color:var(--gold)"> 各項自訂價
+          </label>
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>選擇要賣的項目（可複選）</label>
+        <div style="border:1px solid var(--border);background:var(--bg);max-height:280px;overflow-y:auto">${hasInv ? (bo+po+co) : '<div style="padding:1rem;color:var(--text-dim);text-align:center">目前沒有可售的庫存</div>'}</div>
+      </div>
     </div>
+
+    <div id="sl-other-block" style="${hasInv ? 'display:none' : ''}">
+      <div class="modal-field">
+        <label>說明</label>
+        <input type="text" id="sl-desc" placeholder="例如：店家收走的散卡" value="散卡">
+      </div>
+      <div class="modal-field">
+        <label>成本 HKD（可選，算盈虧用）</label>
+        <input type="number" id="sl-cost" step="0.01" value="0">
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">不知道成本就留 0，只算銷售額</div>
+      </div>
+    </div>
+
     <div class="modal-field" style="display:flex;gap:0.5rem">
       <div style="flex:1"><label>貨幣</label><select id="sl-currency" onchange="document.getElementById('sl-rate').value = (({HKD:1,JPY:0.05,MOP:0.97,CNY:0.88,USD:7.8,TWD:0.24})[this.value] || 1)">${cur}</select></div>
       <div style="flex:1"><label>匯率</label><input type="number" id="sl-rate" step="0.0001" value="0.97"></div>
     </div>
-    <div class="modal-field" id="sl-lump-field"><label>總金額（當地貨幣）</label><input type="number" id="sl-amount" step="0.01" value="0"><div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">按成本比例自動分攤到各項</div></div>
+
+    <div class="modal-field" id="sl-lump-field" style="${hasInv ? '' : 'display:none'}">
+      <label>總金額（當地貨幣）</label>
+      <input type="number" id="sl-amount" step="0.01" value="0">
+      <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem" id="sl-lump-hint">按成本比例自動分攤到各項</div>
+    </div>
     <div class="modal-field" id="sl-each-field" style="display:none;font-size:0.72rem;color:var(--text-dim)">勾選後右側會出現輸入框，分別填每項的金額</div>
+
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">取消</button>
       <button class="btn btn-primary" onclick="confirmSell()">確認</button>
@@ -1421,7 +1489,27 @@ function showSellModal() {
   document.getElementById('modal-backdrop').classList.add('show');
 }
 
+function updateSellType() {
+  const type = document.querySelector('input[name="sl-type"]:checked').value;
+  const isInv = type === 'inv';
+  document.getElementById('sl-inv-block').style.display = isInv ? 'block' : 'none';
+  document.getElementById('sl-other-block').style.display = isInv ? 'none' : 'block';
+  // 其他銷售時 only lump field visible
+  if (!isInv) {
+    document.getElementById('sl-lump-field').style.display = 'block';
+    document.getElementById('sl-each-field').style.display = 'none';
+    const hint = document.getElementById('sl-lump-hint');
+    if (hint) hint.textContent = '此筆銷售的金額';
+  } else {
+    updateSellMode();
+    const hint = document.getElementById('sl-lump-hint');
+    if (hint) hint.textContent = '按成本比例自動分攤到各項';
+  }
+}
+
 function updateSellMode() {
+  const type = document.querySelector('input[name="sl-type"]:checked').value;
+  if (type !== 'inv') return;
   const mode = document.querySelector('input[name="sl-mode"]:checked').value;
   document.getElementById('sl-lump-field').style.display = mode === 'lump' ? 'block' : 'none';
   document.getElementById('sl-each-field').style.display = mode === 'each' ? 'block' : 'none';
@@ -1442,6 +1530,27 @@ function confirmSell() {
   const date = document.getElementById('sl-date').value;
   const currency = document.getElementById('sl-currency').value;
   const rate = num(document.getElementById('sl-rate').value);
+  const sellType = document.querySelector('input[name="sl-type"]:checked').value;
+
+  if (sellType === 'other') {
+    const desc = document.getElementById('sl-desc').value.trim() || '其他銷售';
+    const costHKD = num(document.getElementById('sl-cost').value);
+    const amountLocal = num(document.getElementById('sl-amount').value);
+    if (amountLocal <= 0) { toast('請輸入金額', true); return; }
+    const amountHKD = amountLocal * rate;
+    const sale = {
+      id: uuid(), date, item_type: 'other', item_id: null,
+      currency, rate, amount_local: amountLocal, amount_hkd: amountHKD,
+      description: desc, cost_hkd_manual: costHKD
+    };
+    state.sales.push(sale);
+    saveKey('sales', state.sales);
+    closeModal();
+    renderAll();
+    toast(`已記錄 ${fmt(amountHKD)} HKD`);
+    return;
+  }
+
   const mode = document.querySelector('input[name="sl-mode"]:checked').value;
   const checked = Array.from(document.querySelectorAll('.sl-check:checked'));
   if (checked.length === 0) { toast('請至少選一個項目', true); return; }
@@ -1640,6 +1749,7 @@ window.deleteOpening = deleteOpening;
 window.showSellModal = showSellModal;
 window.confirmSell = confirmSell;
 window.updateSellMode = updateSellMode;
+window.updateSellType = updateSellType;
 window.deleteSale = deleteSale;
 window.batchUpdatePrice = batchUpdatePrice;
 window.confirmBatchPrice = confirmBatchPrice;
