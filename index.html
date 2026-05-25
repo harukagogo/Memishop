@@ -354,21 +354,6 @@
   </div>
 </div>
 
-<div id="password-gate" class="setup-screen" style="display:none">
-  <h2 id="pwd-title">輸入密碼</h2>
-  <p id="pwd-desc" style="color:var(--text-dim)">請輸入密碼以繼續</p>
-  <input type="password" id="pwd-input" placeholder="密碼"
-         style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.7rem 0.9rem;font-family:inherit;font-size:1rem;margin-bottom:0.8rem"
-         onkeydown="if(event.key==='Enter'){submitPassword();}">
-  <input type="password" id="pwd-input-confirm" placeholder="再次輸入以確認" style="display:none;width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.7rem 0.9rem;font-family:inherit;font-size:1rem;margin-bottom:0.8rem"
-         onkeydown="if(event.key==='Enter'){submitPassword();}">
-  <div id="pwd-error" style="color:var(--red);font-size:0.85rem;margin-bottom:0.8rem;min-height:1.2em"></div>
-  <div style="display:flex;gap:0.5rem;justify-content:space-between;align-items:center">
-    <button class="btn" onclick="resetAllAndReload()" style="font-size:0.78rem" id="pwd-reset-btn">清除本機設定</button>
-    <button class="btn btn-primary" onclick="submitPassword()">確認</button>
-  </div>
-</div>
-
 <div id="app" class="container" style="display:none">
   <header class="hero">
     <div>
@@ -401,7 +386,6 @@
     <div class="btn-row" style="margin-bottom: 1rem;">
       <button class="btn" onclick="exportJSON()">匯出 JSON 備份</button>
       <button class="btn" onclick="showImportModal()">從 JSON 匯入</button>
-      <button class="btn" onclick="showChangePasswordModal()">修改密碼</button>
       <button class="btn" onclick="resetFirebaseConfig()" style="color:var(--red)">重設 Firebase</button>
     </div>
     <div class="breakdown-section">
@@ -519,9 +503,8 @@
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getDatabase, ref, onValue, set } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 
-window.firebaseImports = { initializeApp, getDatabase, ref, onValue, set, getAuth, signInAnonymously, onAuthStateChanged };
+window.firebaseImports = { initializeApp, getDatabase, ref, onValue, set };
 window.dispatchEvent(new Event('firebase-ready'));
 </script>
 
@@ -685,20 +668,10 @@ function syncDefaultRates() {
   }
 }
 
-async function initFirebase(cfg) {
-  const { initializeApp, getDatabase, ref, onValue, set, getAuth, signInAnonymously } = window.firebaseImports;
+function initFirebase(cfg) {
+  const { initializeApp, getDatabase, ref, onValue, set } = window.firebaseImports;
   firebaseApp = initializeApp(cfg);
   db = getDatabase(firebaseApp);
-
-  // 匿名登入：Firebase 規則要求已登入的使用者才能讀寫
-  try {
-    const auth = getAuth(firebaseApp);
-    await signInAnonymously(auth);
-  } catch (e) {
-    setSync('error', 'Firebase 登入失敗：' + (e.message || e));
-    toast('Firebase 登入失敗，請檢查是否啟用匿名驗證', true);
-    throw e;
-  }
 
   for (const key of DATA_KEYS) {
     const r = ref(db, 'memi/' + key);
@@ -2727,128 +2700,6 @@ window.showImagePreview = showImagePreview;
 window.saveProductImage = saveProductImage;
 Object.defineProperty(window, 'DEFAULT_RATES', { get: () => DEFAULT_RATES });
 
-// --- 密碼保護 ---
-const PASSWORD_STORAGE_KEY = 'memi_password_hash';
-let pendingCfg = null;
-
-// 用 SubtleCrypto 把密碼 hash（SHA-256）
-async function hashPassword(pwd) {
-  const data = new TextEncoder().encode(pwd);
-  const hashBuf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-function showPasswordGate(mode) {
-  // mode: 'set' = 第一次，要設密碼；'verify' = 驗證既有密碼
-  document.getElementById('setup').style.display = 'none';
-  document.getElementById('app').style.display = 'none';
-  document.getElementById('password-gate').style.display = 'block';
-
-  const confirmEl = document.getElementById('pwd-input-confirm');
-  if (mode === 'set') {
-    document.getElementById('pwd-title').textContent = '設定密碼（第一次）';
-    document.getElementById('pwd-desc').textContent = '請設定一個密碼，之後每次開啟都要輸入。和澳門朋友共用同一組密碼。';
-    confirmEl.style.display = 'block';
-  } else {
-    document.getElementById('pwd-title').textContent = '輸入密碼';
-    document.getElementById('pwd-desc').textContent = '請輸入密碼以進入 Memi鋪';
-    confirmEl.style.display = 'none';
-  }
-  document.getElementById('pwd-input').value = '';
-  confirmEl.value = '';
-  document.getElementById('pwd-error').textContent = '';
-  document.getElementById('pwd-input').focus();
-}
-
-async function submitPassword() {
-  const input = document.getElementById('pwd-input').value;
-  const confirmInput = document.getElementById('pwd-input-confirm').value;
-  const errEl = document.getElementById('pwd-error');
-  const saved = localStorage.getItem(PASSWORD_STORAGE_KEY);
-
-  if (!input) { errEl.textContent = '請輸入密碼'; return; }
-
-  if (!saved) {
-    // 第一次設定
-    if (input.length < 4) { errEl.textContent = '密碼請至少 4 個字元'; return; }
-    if (input !== confirmInput) { errEl.textContent = '兩次輸入的密碼不一樣'; return; }
-    const hash = await hashPassword(input);
-    localStorage.setItem(PASSWORD_STORAGE_KEY, hash);
-    errEl.textContent = '';
-    await afterPasswordOK(input);
-  } else {
-    // 驗證
-    const hash = await hashPassword(input);
-    if (hash !== saved) { errEl.textContent = '密碼錯誤'; return; }
-    errEl.textContent = '';
-    await afterPasswordOK(input);
-  }
-}
-
-async function afterPasswordOK(pwd) {
-  document.getElementById('password-gate').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-  setSync('loading', '連接 Firebase…');
-  try {
-    await initFirebase(pendingCfg);
-  } catch (e) {
-    setSync('error', '連接失敗：' + (e?.message || e));
-    toast('Firebase 連接失敗', true);
-  }
-}
-
-function resetAllAndReload() {
-  if (!confirm('確定要清除本機設定？這會清除：\n• Firebase 設定\n• 密碼\n\n（雲端資料不會被刪除。下次可以重新貼 Firebase 設定與輸入密碼繼續使用）')) return;
-  localStorage.removeItem('memi_firebase_config');
-  localStorage.removeItem(PASSWORD_STORAGE_KEY);
-  location.reload();
-}
-
-function showChangePasswordModal() {
-  document.getElementById('modal-content').innerHTML = `
-    <h3>修改密碼</h3>
-    <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.8rem;line-height:1.6">
-      修改後你和朋友都需要重新用新密碼進入。<br>
-      這個密碼只保護進入介面；Firebase 資料庫本身的安全靠 Firebase 規則。
-    </div>
-    <div class="modal-field">
-      <label>目前密碼</label>
-      <input type="password" id="pwd-old">
-    </div>
-    <div class="modal-field">
-      <label>新密碼（至少 4 字元）</label>
-      <input type="password" id="pwd-new">
-    </div>
-    <div class="modal-field">
-      <label>再次輸入新密碼</label>
-      <input type="password" id="pwd-new2">
-    </div>
-    <div id="pwd-change-err" style="color:var(--red);font-size:0.85rem;min-height:1.2em;margin-bottom:0.5rem"></div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal()">取消</button>
-      <button class="btn btn-primary" onclick="confirmChangePassword()">確認修改</button>
-    </div>`;
-  document.getElementById('modal-backdrop').classList.add('show');
-}
-
-async function confirmChangePassword() {
-  const oldPwd = document.getElementById('pwd-old').value;
-  const newPwd = document.getElementById('pwd-new').value;
-  const newPwd2 = document.getElementById('pwd-new2').value;
-  const errEl = document.getElementById('pwd-change-err');
-  const saved = localStorage.getItem(PASSWORD_STORAGE_KEY);
-
-  const oldHash = await hashPassword(oldPwd);
-  if (oldHash !== saved) { errEl.textContent = '目前密碼錯誤'; return; }
-  if (newPwd.length < 4) { errEl.textContent = '新密碼至少 4 字元'; return; }
-  if (newPwd !== newPwd2) { errEl.textContent = '兩次輸入的新密碼不一樣'; return; }
-
-  const newHash = await hashPassword(newPwd);
-  localStorage.setItem(PASSWORD_STORAGE_KEY, newHash);
-  closeModal();
-  toast('密碼已更新，記得通知朋友新密碼');
-}
-
 function start() {
   const cfgText = localStorage.getItem('memi_firebase_config');
   if (!cfgText) {
@@ -2856,21 +2707,16 @@ function start() {
     return;
   }
   try {
-    pendingCfg = JSON.parse(cfgText);
+    const cfg = JSON.parse(cfgText);
+    document.getElementById('app').style.display = 'block';
+    setSync('loading', '連接 Firebase…');
+    initFirebase(cfg);
   } catch (e) {
     alert('Firebase 設定損壞，已清除。請重新設定。');
     localStorage.removeItem('memi_firebase_config');
     location.reload();
-    return;
   }
-  const hasPwd = !!localStorage.getItem(PASSWORD_STORAGE_KEY);
-  showPasswordGate(hasPwd ? 'verify' : 'set');
 }
-
-window.submitPassword = submitPassword;
-window.resetAllAndReload = resetAllAndReload;
-window.showChangePasswordModal = showChangePasswordModal;
-window.confirmChangePassword = confirmChangePassword;
 
 window.addEventListener('firebase-ready', start);
 </script>
