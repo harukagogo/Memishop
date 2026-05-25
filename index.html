@@ -165,6 +165,7 @@
   .status-held { color: var(--blue); border-color: rgba(107, 168, 210, 0.3); background: rgba(107, 168, 210, 0.08); }
   .status-opened { color: var(--gold); border-color: rgba(13, 148, 136, 0.3); background: rgba(13, 148, 136, 0.08); }
   .status-sold { color: var(--text-muted); border-color: rgba(90, 90, 80, 0.3); background: rgba(90, 90, 80, 0.08); }
+  .status-exchanged { color: #b07cc6; border-color: rgba(176, 124, 198, 0.3); background: rgba(176, 124, 198, 0.08); }
 
   .cell-input, .cell-select {
     width: 100%; background: transparent; border: none;
@@ -353,6 +354,21 @@
   </div>
 </div>
 
+<div id="password-gate" class="setup-screen" style="display:none">
+  <h2 id="pwd-title">輸入密碼</h2>
+  <p id="pwd-desc" style="color:var(--text-dim)">請輸入密碼以繼續</p>
+  <input type="password" id="pwd-input" placeholder="密碼"
+         style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.7rem 0.9rem;font-family:inherit;font-size:1rem;margin-bottom:0.8rem"
+         onkeydown="if(event.key==='Enter'){submitPassword();}">
+  <input type="password" id="pwd-input-confirm" placeholder="再次輸入以確認" style="display:none;width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.7rem 0.9rem;font-family:inherit;font-size:1rem;margin-bottom:0.8rem"
+         onkeydown="if(event.key==='Enter'){submitPassword();}">
+  <div id="pwd-error" style="color:var(--red);font-size:0.85rem;margin-bottom:0.8rem;min-height:1.2em"></div>
+  <div style="display:flex;gap:0.5rem;justify-content:space-between;align-items:center">
+    <button class="btn" onclick="resetAllAndReload()" style="font-size:0.78rem" id="pwd-reset-btn">清除本機設定</button>
+    <button class="btn btn-primary" onclick="submitPassword()">確認</button>
+  </div>
+</div>
+
 <div id="app" class="container" style="display:none">
   <header class="hero">
     <div>
@@ -376,6 +392,7 @@
     <button class="tab" data-tab="cards">單卡 <span class="tab-count" id="count-cards">0</span></button>
     <button class="tab" data-tab="openings">開箱 <span class="tab-count" id="count-openings">0</span></button>
     <button class="tab" data-tab="sales">銷售 <span class="tab-count" id="count-sales">0</span></button>
+    <button class="tab" data-tab="exchanges">換卡 <span class="tab-count" id="count-exchanges">0</span></button>
     <button class="tab" data-tab="settings">設定</button>
   </nav>
 
@@ -384,6 +401,7 @@
     <div class="btn-row" style="margin-bottom: 1rem;">
       <button class="btn" onclick="exportJSON()">匯出 JSON 備份</button>
       <button class="btn" onclick="showImportModal()">從 JSON 匯入</button>
+      <button class="btn" onclick="showChangePasswordModal()">修改密碼</button>
       <button class="btn" onclick="resetFirebaseConfig()" style="color:var(--red)">重設 Firebase</button>
     </div>
     <div class="breakdown-section">
@@ -465,6 +483,17 @@
     <div id="sales-host"></div>
   </section>
 
+  <section id="exchanges" class="section">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">換卡記錄<span class="slug">/ 換 /</span></h2>
+        <p class="section-desc">以物易物：用庫存換客人的卡/盒，不算銷售，換入成本 = 換出成本</p>
+      </div>
+      <button class="btn btn-primary" onclick="showExchangeModal()">＋ 新增換卡</button>
+    </div>
+    <div id="exchanges-host"></div>
+  </section>
+
   <section id="settings" class="section">
     <div class="section-header">
       <div>
@@ -490,8 +519,9 @@
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getDatabase, ref, onValue, set } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 
-window.firebaseImports = { initializeApp, getDatabase, ref, onValue, set };
+window.firebaseImports = { initializeApp, getDatabase, ref, onValue, set, getAuth, signInAnonymously, onAuthStateChanged };
 window.dispatchEvent(new Event('firebase-ready'));
 </script>
 
@@ -501,7 +531,7 @@ const CURRENCIES = ['HKD', 'JPY', 'MOP', 'CNY', 'USD', 'TWD'];
 const BUY_TYPES = ['盒', '卡包', '單卡'];
 
 const state = {
-  purchases: [], boxes: [], packets: [], cards: [], openings: [], sales: [],
+  purchases: [], boxes: [], packets: [], cards: [], openings: [], sales: [], exchanges: [],
   settings: {
     categories: ['寶可夢', '海賊王', 'MTG', 'Union Arena', '遊戲王'],
     products: ['M2', 'SV9a', 'SV8', 'CLK', 'ホワイトフレア', 'MEGAドリーム', 'ロケット団', 'ムニキス', 'スペシャルBOX', '散卡', '神の島の冒険'],
@@ -513,7 +543,7 @@ const state = {
 
 // 表格排序狀態：按 kind 分別記錄。null = 不排序（陣列自然順序）
 const sortState = {
-  purchases: null, boxes: null, packets: null, cards: null, openings: null, sales: null,
+  purchases: null, boxes: null, packets: null, cards: null, openings: null, sales: null, exchanges: null,
   breakdown: { field: 'market', dir: 'desc' }  // 預設按現值降序
 };
 
@@ -591,7 +621,7 @@ function sortableTh(kind, field, label, extraStyle = '') {
 let db = null;
 let firebaseApp = null;
 let isApplyingRemote = false;
-const DATA_KEYS = ['purchases', 'boxes', 'packets', 'cards', 'openings', 'sales', 'settings'];
+const DATA_KEYS = ['purchases', 'boxes', 'packets', 'cards', 'openings', 'sales', 'exchanges', 'settings'];
 
 function parseFirebaseConfig(text) {
   let cleaned = text.trim();
@@ -655,10 +685,20 @@ function syncDefaultRates() {
   }
 }
 
-function initFirebase(cfg) {
-  const { initializeApp, getDatabase, ref, onValue, set } = window.firebaseImports;
+async function initFirebase(cfg) {
+  const { initializeApp, getDatabase, ref, onValue, set, getAuth, signInAnonymously } = window.firebaseImports;
   firebaseApp = initializeApp(cfg);
   db = getDatabase(firebaseApp);
+
+  // 匿名登入：Firebase 規則要求已登入的使用者才能讀寫
+  try {
+    const auth = getAuth(firebaseApp);
+    await signInAnonymously(auth);
+  } catch (e) {
+    setSync('error', 'Firebase 登入失敗：' + (e.message || e));
+    toast('Firebase 登入失敗，請檢查是否啟用匿名驗證', true);
+    throw e;
+  }
 
   for (const key of DATA_KEYS) {
     const r = ref(db, 'memi/' + key);
@@ -772,9 +812,9 @@ function cardTitle(c) {
 }
 
 function costHKD(p) { return num(p.unit_price) * num(p.rate); }
-function boxStatus(b) { if (b.sold_sale_id) return 'sold'; if (b.opened_event_id) return 'opened'; return 'held'; }
-function packetStatus(p) { if (p.sold_sale_id) return 'sold'; if (p.opened_event_id) return 'opened'; return 'held'; }
-function cardStatus(c) { return c.sold_sale_id ? 'sold' : 'held'; }
+function boxStatus(b) { if (b.sold_sale_id) return 'sold'; if (b.exchanged_out_id) return 'exchanged'; if (b.opened_event_id) return 'opened'; return 'held'; }
+function packetStatus(p) { if (p.sold_sale_id) return 'sold'; if (p.exchanged_out_id) return 'exchanged'; if (p.opened_event_id) return 'opened'; return 'held'; }
+function cardStatus(c) { return c.sold_sale_id ? 'sold' : c.exchanged_out_id ? 'exchanged' : 'held'; }
 
 function computeTotals() {
   let buyTotal = 0, saleTotal = 0;
@@ -784,19 +824,19 @@ function computeTotals() {
   let realizedPL = 0;
 
   for (const b of state.boxes) {
-    buyTotal += num(b.cost_hkd);
+    if (!b.source_exchange_id) buyTotal += num(b.cost_hkd);
     const st = boxStatus(b);
     if (st === 'held') { boxInvCost += num(b.cost_hkd); boxInvMarket += num(b.market_price_hkd); boxInvCount++; }
     else if (st === 'sold') { const s = state.sales.find(x => x.id === b.sold_sale_id); if (s) realizedPL += num(s.amount_hkd) - num(b.cost_hkd); }
   }
   for (const pk of state.packets) {
-    buyTotal += num(pk.cost_hkd);
+    if (!pk.source_exchange_id) buyTotal += num(pk.cost_hkd);
     const st = packetStatus(pk);
     if (st === 'held') { packetInvCost += num(pk.cost_hkd); packetInvMarket += num(pk.market_price_hkd); packetInvCount++; }
     else if (st === 'sold') { const s = state.sales.find(x => x.id === pk.sold_sale_id); if (s) realizedPL += num(s.amount_hkd) - num(pk.cost_hkd); }
   }
   for (const c of state.cards) {
-    if (!c.source_opening_id) buyTotal += num(c.cost_hkd);
+    if (!c.source_opening_id && !c.source_exchange_id) buyTotal += num(c.cost_hkd);
     const st = cardStatus(c);
     if (st === 'held') { cardInvCost += num(c.cost_hkd); cardInvMarket += num(c.market_price_hkd); cardInvCount++; }
     else if (st === 'sold') { const s = state.sales.find(x => x.id === c.sold_sale_id); if (s) realizedPL += num(s.amount_hkd) - num(c.cost_hkd); }
@@ -1135,7 +1175,7 @@ function renderContainerInventory(host, items, kind, statusFn) {
     const pl = num(item.market_price_hkd) - num(item.cost_hkd);
     const plCls = st === 'held' ? (pl >= 0 ? 'positive' : 'negative') : '';
     const plSign = pl >= 0 ? '+' : '';
-    const stLabel = st === 'held' ? '持有' : st === 'opened' ? '已拆' : '已賣';
+    const stLabel = st === 'held' ? '持有' : st === 'opened' ? '已拆' : st === 'exchanged' ? '已換出' : '已賣';
     rows += `<tr data-id="${item.id}" data-kind="${kind}">
       <td class="status"><span class="status-pill status-${st}">${stLabel}</span></td>
       <td>${inCell('product', item.product, 'wide', '商品編號')}</td>
@@ -1185,8 +1225,8 @@ function renderCards() {
     const pl = num(c.market_price_hkd) - num(c.cost_hkd);
     const plCls = st === 'held' ? (pl >= 0 ? 'positive' : 'negative') : '';
     const plSign = pl >= 0 ? '+' : '';
-    const stLabel = st === 'held' ? '持有' : '已賣';
-    const origin = c.source_purchase_id ? '買入' : c.source_opening_id ? '開箱' : '手動';
+    const stLabel = st === 'held' ? '持有' : st === 'exchanged' ? '已換出' : '已賣';
+    const origin = c.source_purchase_id ? '買入' : c.source_opening_id ? '開箱' : c.source_exchange_id ? '換入' : '手動';
     const sourceCell = c.source_opening_id
       ? '<span class="computed" style="display:block;background:transparent;text-align:center;font-size:0.72rem">（開箱）</span>'
       : datalistCell('source', c.source, 'source-list', '', '來源');
@@ -1202,7 +1242,7 @@ function renderCards() {
       <td>${st === 'held' ? numCellHTML('market_price_hkd', c.market_price_hkd, 2) : '<span class="computed" style="display:block">—</span>'}</td>
       <td class="computed ${plCls}">${st === 'held' ? plSign + fmt(pl) : '—'}</td>
       <td>${inCell('note', c.note, 'wide', '備註')}</td>
-      <td>${c.source_purchase_id || c.source_opening_id ? '' : `<button class="row-del" onclick="deleteCard('${c.id}')">✕</button>`}</td>
+      <td>${c.source_purchase_id || c.source_opening_id || c.source_exchange_id ? '' : `<button class="row-del" onclick="deleteCard('${c.id}')">✕</button>`}</td>
     </tr>`;
     mobile += `<div class="mobile-card" data-id="${c.id}" data-kind="card">
       <div class="mobile-card-header">
@@ -1223,7 +1263,7 @@ function renderCards() {
         ` : `<div class="mobile-card-field full"><label>狀態</label><div class="computed-val">已賣</div></div>`}
         <div class="mobile-card-field full"><label>備註</label>${inCell('note', c.note, '', '例如 PSA10')}</div>
       </div>
-      ${c.source_purchase_id || c.source_opening_id ? '' : `<div class="mobile-card-actions"><button class="btn" onclick="deleteCard('${c.id}')" style="font-size:0.75rem">刪除</button></div>`}
+      ${c.source_purchase_id || c.source_opening_id || c.source_exchange_id ? '' : `<div class="mobile-card-actions"><button class="btn" onclick="deleteCard('${c.id}')" style="font-size:0.75rem">刪除</button></div>`}
     </div>`;
   }
   host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
@@ -1380,6 +1420,69 @@ function renderSales() {
   }
   host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
     ${sortableTh('sales','date','銷售日')}${sortableTh('sales','item','項目')}${sortableTh('sales','currency','貨幣')}${sortableTh('sales','rate','匯率')}${sortableTh('sales','amount_local','金額（當地）')}${sortableTh('sales','amount_hkd','金額 HKD')}${sortableTh('sales','cost','成本 HKD')}${sortableTh('sales','pl','盈虧')}<th>備註</th><th></th>
+  </tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="mobile-cards">${mobile}</div>`;
+}
+
+function describeExchangeItems(list) {
+  // list: array of {type, id} — produce a readable label
+  if (!list || list.length === 0) return '(無)';
+  return list.map(it => {
+    if (it.type === 'box') { const b = state.boxes.find(x => x.id === it.id); return b ? `[盒] ${b.product}` : '[盒] (已刪)'; }
+    if (it.type === 'packet') { const p = state.packets.find(x => x.id === it.id); return p ? `[包] ${p.product}` : '[包] (已刪)'; }
+    if (it.type === 'card') { const c = state.cards.find(x => x.id === it.id); return c ? `[卡] ${cardTitle(c)}` : '[卡] (已刪)'; }
+    return '(未知)';
+  }).join(' · ');
+}
+
+function renderExchanges() {
+  document.getElementById('count-exchanges').textContent = state.exchanges.length;
+  const host = document.getElementById('exchanges-host');
+  if (state.exchanges.length === 0) { host.innerHTML = '<div class="empty-state">尚無換卡記錄 · 點「＋ 新增換卡」開始</div>'; return; }
+
+  const enriched = state.exchanges.map(ex => ({
+    ex,
+    outLabel: describeExchangeItems(ex.out_items),
+    inLabel: describeExchangeItems(ex.in_items),
+    cost: num(ex.cost_hkd)
+  }));
+
+  const sorted = sortArray(enriched, 'exchanges', (e, f) => {
+    if (f === 'date') return e.ex.date;
+    if (f === 'out') return e.outLabel;
+    if (f === 'in') return e.inLabel;
+    if (f === 'cost') return e.cost;
+    return e.ex[f];
+  });
+
+  let rows = '', mobile = '';
+  for (const e of sorted) {
+    const ex = e.ex;
+    rows += `<tr>
+      <td style="padding:0.55rem 0.7rem">${escapeHTML(ex.date)}</td>
+      <td style="padding:0.55rem 0.7rem">${escapeHTML(e.outLabel)}</td>
+      <td style="padding:0.55rem 0.7rem;color:var(--gold)">→</td>
+      <td style="padding:0.55rem 0.7rem">${escapeHTML(e.inLabel)}</td>
+      <td class="computed">${fmt(e.cost)}</td>
+      <td style="padding:0.55rem 0.7rem">${escapeHTML(ex.note || '')}</td>
+      <td><button class="row-del" onclick="deleteExchange('${ex.id}')">✕</button></td>
+    </tr>`;
+    mobile += `<div class="mobile-card">
+      <div class="mobile-card-header">
+        <div class="mobile-card-title">換卡</div>
+        <div class="mobile-card-meta">${escapeHTML(ex.date)}</div>
+      </div>
+      <div class="mobile-card-grid">
+        <div class="mobile-card-field full"><label>換出（我的）</label><div class="computed-val" style="text-align:left;font-family:inherit;font-size:0.8rem">${escapeHTML(e.outLabel)}</div></div>
+        <div class="mobile-card-field full"><label>換入（客人的）</label><div class="computed-val" style="text-align:left;font-family:inherit;font-size:0.8rem">${escapeHTML(e.inLabel)}</div></div>
+        <div class="mobile-card-field"><label>換入成本 HKD</label><div class="computed-val">${fmt(e.cost)}</div></div>
+        ${ex.note ? `<div class="mobile-card-field full"><label>備註</label><div class="computed-val" style="text-align:left;font-family:inherit">${escapeHTML(ex.note)}</div></div>` : ''}
+      </div>
+      <div class="mobile-card-actions"><button class="btn" onclick="deleteExchange('${ex.id}')" style="font-size:0.75rem">刪除</button></div>
+    </div>`;
+  }
+  host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
+    ${sortableTh('exchanges','date','日期')}${sortableTh('exchanges','out','換出（我的）')}<th></th>${sortableTh('exchanges','in','換入（客人的）')}${sortableTh('exchanges','cost','換入成本 HKD')}<th>備註</th><th></th>
   </tr></thead><tbody>${rows}</tbody></table></div>
   <div class="mobile-cards">${mobile}</div>`;
 }
@@ -1624,7 +1727,7 @@ function handleEdit(kind, id, field, el) {
 
 function renderAll() {
   renderPurchases(); renderBoxes(); renderPackets(); renderCards();
-  renderOpenings(); renderSales(); renderDashboard(); renderSettings();
+  renderOpenings(); renderSales(); renderExchanges(); renderDashboard(); renderSettings();
 }
 
 function addPurchase() {
@@ -2203,6 +2306,258 @@ function deleteSale(id) {
   renderAll();
 }
 
+// ===== 換卡功能 =====
+function showExchangeModal() {
+  const boxGroups = groupHeldByProduct('box');
+  const packetGroups = groupHeldByProduct('packet');
+  const hC = state.cards.filter(c => cardStatus(c) === 'held');
+  const boxGroupList = Object.entries(boxGroups);
+  const packetGroupList = Object.entries(packetGroups);
+
+  const cardGroupsMap = {};
+  for (const c of hC) {
+    const title = cardTitle(c);
+    if (!cardGroupsMap[title]) cardGroupsMap[title] = { items: [] };
+    cardGroupsMap[title].items.push(c);
+  }
+  const cardGroupList = Object.entries(cardGroupsMap);
+  const hasInv = boxGroupList.length + packetGroupList.length + cardGroupList.length > 0;
+
+  if (!hasInv) { toast('沒有可換出的庫存', true); return; }
+
+  const mkGroupRow = (kind, product, group) => {
+    const unitCost = group.items.reduce((s, x) => s + num(x.cost_hkd), 0) / group.items.length;
+    return `
+    <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.55rem;border-bottom:1px solid var(--border-soft);cursor:pointer">
+      <input type="checkbox" class="ex-out-check" data-kind="group" data-group-kind="${kind}" data-product="${escapeHTML(product)}" data-unit-cost="${unitCost}" data-max="${group.items.length}" style="width:auto;accent-color:var(--gold)">
+      <span style="flex:1;font-size:0.85rem">[${kind === 'box' ? '盒' : '包'}] ${escapeHTML(product)} <span style="color:var(--text-dim);font-size:0.78rem">(持有 ${group.items.length})</span></span>
+      <input type="number" class="ex-out-qty" min="1" max="${group.items.length}" value="1" style="width:55px;font-family:var(--font-mono);font-size:0.78rem;padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-align:right">
+      <span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-dim);min-width:55px;text-align:right">${fmt(unitCost)}/個</span>
+    </label>`;
+  };
+  const mkCardGroupRow = (title, group) => {
+    const unitCost = group.items.reduce((s, x) => s + num(x.cost_hkd), 0) / group.items.length;
+    return `
+    <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.55rem;border-bottom:1px solid var(--border-soft);cursor:pointer">
+      <input type="checkbox" class="ex-out-check" data-kind="card-group" data-title="${escapeHTML(title)}" data-unit-cost="${unitCost}" data-max="${group.items.length}" style="width:auto;accent-color:var(--gold)">
+      <span style="flex:1;font-size:0.85rem">[卡] ${escapeHTML(title)} <span style="color:var(--text-dim);font-size:0.78rem">(持有 ${group.items.length})</span></span>
+      <input type="number" class="ex-out-qty" min="1" max="${group.items.length}" value="1" style="width:55px;font-family:var(--font-mono);font-size:0.78rem;padding:0.3rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-align:right">
+      <span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-dim);min-width:55px;text-align:right">${fmt(unitCost)}/張</span>
+    </label>`;
+  };
+
+  const bo = boxGroupList.map(([p, g]) => mkGroupRow('box', p, g)).join('');
+  const po = packetGroupList.map(([p, g]) => mkGroupRow('packet', p, g)).join('');
+  const co = cardGroupList.map(([t, g]) => mkCardGroupRow(t, g)).join('');
+  const catOpts = (state.settings.categories || []).map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
+
+  document.getElementById('modal-content').innerHTML = `
+    <h3>新增換卡</h3>
+    <div class="modal-field"><label>日期</label><input type="date" id="ex-date" value="${todayISO()}"></div>
+
+    <div class="modal-field">
+      <label>① 換出去的（我的庫存）</label>
+      <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:0.3rem">盒/包/單卡都按相同商品分組，設數量後從最舊扣</div>
+      <div style="border:1px solid var(--border);background:var(--bg);max-height:200px;overflow-y:auto">${bo}${po}${co}</div>
+    </div>
+
+    <div class="modal-field">
+      <label>② 換進來的（客人的東西）</label>
+      <div id="ex-in-list"></div>
+      <button class="btn" onclick="addExchangeInRow()" style="font-size:0.78rem;margin-top:0.4rem">＋ 多加一項換入</button>
+    </div>
+
+    <div class="modal-field">
+      <label>③ 換入總成本 HKD</label>
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <input type="number" id="ex-cost" step="0.01" value="0" style="flex:1">
+        <button class="btn" onclick="recalcExchangeCost()" style="font-size:0.75rem;white-space:nowrap">⟳ 用換出成本</button>
+      </div>
+      <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">預設 = 換出去東西的成本總和；如有補差價可自己改</div>
+    </div>
+
+    <div class="modal-field">
+      <label>備註</label>
+      <input type="text" id="ex-note" placeholder="例如：跟客人 A 換、補了 50 蚊差價等">
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmExchange()">確認換卡</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('show');
+
+  // 預存類別選項供換入列使用
+  window._exCatOpts = catOpts;
+  addExchangeInRow(); // 先加一列換入
+
+  // 勾選換出時自動重算成本
+  document.querySelectorAll('.ex-out-check, .ex-out-qty').forEach(el => {
+    el.addEventListener('change', recalcExchangeCost);
+  });
+}
+
+function addExchangeInRow() {
+  const host = document.getElementById('ex-in-list');
+  const idx = host.children.length;
+  const catOpts = window._exCatOpts || '';
+  const row = document.createElement('div');
+  row.className = 'ex-in-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;padding:0.5rem;border:1px solid var(--border-soft);border-radius:4px;margin-bottom:0.4rem;position:relative';
+  row.innerHTML = `
+    <select class="ex-in-type" style="font-size:0.82rem;padding:0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">
+      <option value="card">單卡</option>
+      <option value="box">盒</option>
+      <option value="packet">卡包</option>
+    </select>
+    <select class="ex-in-cat" style="font-size:0.82rem;padding:0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">${catOpts}</select>
+    <input class="ex-in-product" type="text" placeholder="商品編號（例 M2）" style="font-size:0.82rem;padding:0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">
+    <input class="ex-in-number" type="text" placeholder="卡編號（例 #111，盒/包可空）" style="font-size:0.82rem;padding:0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">
+    <input class="ex-in-name" type="text" placeholder="卡名（可空）" style="font-size:0.82rem;padding:0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">
+    <input class="ex-in-qty" type="number" min="1" value="1" placeholder="數量" style="font-size:0.82rem;padding:0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text)">
+    ${idx > 0 ? `<button onclick="this.parentElement.remove()" style="position:absolute;top:-8px;right:-8px;background:var(--red);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:0.7rem;line-height:1">✕</button>` : ''}
+  `;
+  host.appendChild(row);
+}
+
+function getExchangeOutTargets() {
+  const targets = [];
+  const checked = Array.from(document.querySelectorAll('.ex-out-check:checked'));
+  for (const el of checked) {
+    const row = el.closest('label');
+    const qtyEl = row.querySelector('.ex-out-qty');
+    const qty = Math.max(1, Math.floor(num(qtyEl?.value || 1)));
+    if (el.dataset.kind === 'group') {
+      const kind = el.dataset.groupKind;
+      const product = el.dataset.product;
+      const picked = pickOldestHeld(kind, product, qty);
+      if (picked.length < qty) return { error: `${product} 只有 ${picked.length} 個可換` };
+      for (const p of picked) targets.push({ type: kind, id: p.id, cost: num(p.cost_hkd) });
+    } else if (el.dataset.kind === 'card-group') {
+      const title = el.dataset.title;
+      const picked = pickOldestHeldCards(title, qty);
+      if (picked.length < qty) return { error: `「${title}」只有 ${picked.length} 張可換` };
+      for (const c of picked) targets.push({ type: 'card', id: c.id, cost: num(c.cost_hkd) });
+    }
+  }
+  return { targets };
+}
+
+function recalcExchangeCost() {
+  const result = getExchangeOutTargets();
+  if (result.error) return; // 別打斷，等確認時再報錯
+  const total = result.targets.reduce((s, t) => s + t.cost, 0);
+  document.getElementById('ex-cost').value = total.toFixed(2);
+}
+
+function confirmExchange() {
+  const date = document.getElementById('ex-date').value;
+  const note = document.getElementById('ex-note').value.trim();
+  const costHKD = num(document.getElementById('ex-cost').value);
+
+  // 換出
+  const outResult = getExchangeOutTargets();
+  if (outResult.error) { toast(outResult.error, true); return; }
+  const outTargets = outResult.targets;
+  if (outTargets.length === 0) { toast('請選擇至少一個換出的庫存', true); return; }
+
+  // 換入
+  const inRows = Array.from(document.querySelectorAll('.ex-in-row'));
+  const inItems = [];
+  for (const row of inRows) {
+    const type = row.querySelector('.ex-in-type').value;
+    const cat = row.querySelector('.ex-in-cat').value;
+    const product = row.querySelector('.ex-in-product').value.trim();
+    let number = row.querySelector('.ex-in-number').value.trim();
+    const name = row.querySelector('.ex-in-name').value.trim();
+    const qty = Math.max(1, Math.floor(num(row.querySelector('.ex-in-qty').value)));
+    if (!product && !name && !number) continue; // 空列略過
+    inItems.push({ type, cat, product, number, name, qty });
+  }
+  if (inItems.length === 0) { toast('請填寫至少一項換進來的東西', true); return; }
+
+  const exchangeId = uuid();
+  const totalInCount = inItems.reduce((s, it) => s + it.qty, 0);
+  const perInCost = totalInCount > 0 ? costHKD / totalInCount : 0;
+
+  // 標記換出的庫存
+  for (const t of outTargets) {
+    if (t.type === 'box') { const b = state.boxes.find(x => x.id === t.id); if (b) b.exchanged_out_id = exchangeId; }
+    else if (t.type === 'packet') { const p = state.packets.find(x => x.id === t.id); if (p) p.exchanged_out_id = exchangeId; }
+    else if (t.type === 'card') { const c = state.cards.find(x => x.id === t.id); if (c) c.exchanged_out_id = exchangeId; }
+  }
+
+  // 建立換入的庫存
+  const inItemRefs = [];
+  for (const it of inItems) {
+    for (let i = 0; i < it.qty; i++) {
+      const newId = uuid();
+      if (it.type === 'box') {
+        state.boxes.unshift({ id: newId, purchase_id: null, source_exchange_id: exchangeId, product: it.product || it.name || '(換入)', category: it.cat || '', cost_hkd: perInCost, market_price_hkd: lookupContainerMarketPrice('box', it.product || ''), opened_event_id: null, sold_sale_id: null, exchanged_out_id: null, note: `換入於 ${date}` });
+        inItemRefs.push({ type: 'box', id: newId });
+      } else if (it.type === 'packet') {
+        state.packets.unshift({ id: newId, purchase_id: null, source_exchange_id: exchangeId, product: it.product || it.name || '(換入)', category: it.cat || '', cost_hkd: perInCost, market_price_hkd: lookupContainerMarketPrice('packet', it.product || ''), opened_event_id: null, sold_sale_id: null, exchanged_out_id: null, note: `換入於 ${date}` });
+        inItemRefs.push({ type: 'packet', id: newId });
+      } else {
+        state.cards.unshift({ id: newId, source_purchase_id: null, source_opening_id: null, source_exchange_id: exchangeId, card_name: it.name || '', box_code: it.product || '', card_number: it.number || '', category: it.cat || '', source: '換入', cost_hkd: perInCost, market_price_hkd: lookupCardMarketPrice(it.name, it.number, it.product), sold_sale_id: null, exchanged_out_id: null, note: `換入於 ${date}` });
+        inItemRefs.push({ type: 'card', id: newId });
+      }
+    }
+  }
+
+  const exchange = {
+    id: exchangeId, date,
+    out_items: outTargets.map(t => ({ type: t.type, id: t.id })),
+    in_items: inItemRefs,
+    cost_hkd: costHKD,
+    note
+  };
+  state.exchanges.unshift(exchange);
+
+  saveKey('exchanges', state.exchanges);
+  saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
+  closeModal();
+  renderAll();
+  toast(`已記錄換卡：換出 ${outTargets.length} 項，換入 ${inItemRefs.length} 項`);
+}
+
+function deleteExchange(id) {
+  const ex = state.exchanges.find(x => x.id === id);
+  if (!ex) return;
+  // 換入的東西若已再被賣出/換出/開箱，不能刪
+  const inItems = ex.in_items || [];
+  for (const it of inItems) {
+    let obj = null;
+    if (it.type === 'box') obj = state.boxes.find(x => x.id === it.id);
+    else if (it.type === 'packet') obj = state.packets.find(x => x.id === it.id);
+    else if (it.type === 'card') obj = state.cards.find(x => x.id === it.id);
+    if (obj && (obj.sold_sale_id || obj.exchanged_out_id || obj.opened_event_id)) {
+      toast('換入的東西已再被使用（賣/換/拆），不可刪除此換卡', true);
+      return;
+    }
+  }
+  if (!confirm(`刪除此換卡？\n• 換出的 ${ex.out_items.length} 項會恢復為持有\n• 換入的 ${inItems.length} 項會從庫存移除`)) return;
+
+  // 恢復換出的
+  for (const it of ex.out_items) {
+    if (it.type === 'box') { const b = state.boxes.find(x => x.id === it.id); if (b) b.exchanged_out_id = null; }
+    else if (it.type === 'packet') { const p = state.packets.find(x => x.id === it.id); if (p) p.exchanged_out_id = null; }
+    else if (it.type === 'card') { const c = state.cards.find(x => x.id === it.id); if (c) c.exchanged_out_id = null; }
+  }
+  // 移除換入的
+  const inBoxIds = inItems.filter(i => i.type === 'box').map(i => i.id);
+  const inPacketIds = inItems.filter(i => i.type === 'packet').map(i => i.id);
+  const inCardIds = inItems.filter(i => i.type === 'card').map(i => i.id);
+  state.boxes = state.boxes.filter(b => !inBoxIds.includes(b.id));
+  state.packets = state.packets.filter(p => !inPacketIds.includes(p.id));
+  state.cards = state.cards.filter(c => !inCardIds.includes(c.id));
+
+  state.exchanges = state.exchanges.filter(x => x.id !== id);
+  saveKey('exchanges', state.exchanges);
+  saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
+  renderAll();
+}
+
 function batchUpdatePrice(kind) {
   const arr = kind === 'box' ? state.boxes : state.packets;
   const sf = kind === 'box' ? boxStatus : packetStatus;
@@ -2276,9 +2631,10 @@ function closeModal() { document.getElementById('modal-backdrop').classList.remo
 
 function exportJSON() {
   const data = {
-    version: 4, exported_at: new Date().toISOString(),
+    version: 5, exported_at: new Date().toISOString(),
     purchases: state.purchases, boxes: state.boxes, packets: state.packets,
-    cards: state.cards, openings: state.openings, sales: state.sales, settings: state.settings
+    cards: state.cards, openings: state.openings, sales: state.sales,
+    exchanges: state.exchanges, settings: state.settings
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -2311,6 +2667,7 @@ async function confirmImport() {
     state.cards = data.cards || [];
     state.openings = data.openings || [];
     state.sales = data.sales || [];
+    state.exchanges = data.exchanges || [];
     if (data.settings) state.settings = { ...state.settings, ...data.settings };
     await Promise.all(DATA_KEYS.map(k => saveKey(k, state[k])));
     closeModal();
@@ -2361,9 +2718,136 @@ window.removeSetting = removeSetting;
 window.updateSetting = updateSetting;
 window.saveDefaultRate = saveDefaultRate;
 window.toggleSort = toggleSort;
+window.showExchangeModal = showExchangeModal;
+window.addExchangeInRow = addExchangeInRow;
+window.recalcExchangeCost = recalcExchangeCost;
+window.confirmExchange = confirmExchange;
+window.deleteExchange = deleteExchange;
 window.showImagePreview = showImagePreview;
 window.saveProductImage = saveProductImage;
 Object.defineProperty(window, 'DEFAULT_RATES', { get: () => DEFAULT_RATES });
+
+// --- 密碼保護 ---
+const PASSWORD_STORAGE_KEY = 'memi_password_hash';
+let pendingCfg = null;
+
+// 用 SubtleCrypto 把密碼 hash（SHA-256）
+async function hashPassword(pwd) {
+  const data = new TextEncoder().encode(pwd);
+  const hashBuf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function showPasswordGate(mode) {
+  // mode: 'set' = 第一次，要設密碼；'verify' = 驗證既有密碼
+  document.getElementById('setup').style.display = 'none';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('password-gate').style.display = 'block';
+
+  const confirmEl = document.getElementById('pwd-input-confirm');
+  if (mode === 'set') {
+    document.getElementById('pwd-title').textContent = '設定密碼（第一次）';
+    document.getElementById('pwd-desc').textContent = '請設定一個密碼，之後每次開啟都要輸入。和澳門朋友共用同一組密碼。';
+    confirmEl.style.display = 'block';
+  } else {
+    document.getElementById('pwd-title').textContent = '輸入密碼';
+    document.getElementById('pwd-desc').textContent = '請輸入密碼以進入 Memi鋪';
+    confirmEl.style.display = 'none';
+  }
+  document.getElementById('pwd-input').value = '';
+  confirmEl.value = '';
+  document.getElementById('pwd-error').textContent = '';
+  document.getElementById('pwd-input').focus();
+}
+
+async function submitPassword() {
+  const input = document.getElementById('pwd-input').value;
+  const confirmInput = document.getElementById('pwd-input-confirm').value;
+  const errEl = document.getElementById('pwd-error');
+  const saved = localStorage.getItem(PASSWORD_STORAGE_KEY);
+
+  if (!input) { errEl.textContent = '請輸入密碼'; return; }
+
+  if (!saved) {
+    // 第一次設定
+    if (input.length < 4) { errEl.textContent = '密碼請至少 4 個字元'; return; }
+    if (input !== confirmInput) { errEl.textContent = '兩次輸入的密碼不一樣'; return; }
+    const hash = await hashPassword(input);
+    localStorage.setItem(PASSWORD_STORAGE_KEY, hash);
+    errEl.textContent = '';
+    await afterPasswordOK(input);
+  } else {
+    // 驗證
+    const hash = await hashPassword(input);
+    if (hash !== saved) { errEl.textContent = '密碼錯誤'; return; }
+    errEl.textContent = '';
+    await afterPasswordOK(input);
+  }
+}
+
+async function afterPasswordOK(pwd) {
+  document.getElementById('password-gate').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  setSync('loading', '連接 Firebase…');
+  try {
+    await initFirebase(pendingCfg);
+  } catch (e) {
+    setSync('error', '連接失敗：' + (e?.message || e));
+    toast('Firebase 連接失敗', true);
+  }
+}
+
+function resetAllAndReload() {
+  if (!confirm('確定要清除本機設定？這會清除：\n• Firebase 設定\n• 密碼\n\n（雲端資料不會被刪除。下次可以重新貼 Firebase 設定與輸入密碼繼續使用）')) return;
+  localStorage.removeItem('memi_firebase_config');
+  localStorage.removeItem(PASSWORD_STORAGE_KEY);
+  location.reload();
+}
+
+function showChangePasswordModal() {
+  document.getElementById('modal-content').innerHTML = `
+    <h3>修改密碼</h3>
+    <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.8rem;line-height:1.6">
+      修改後你和朋友都需要重新用新密碼進入。<br>
+      這個密碼只保護進入介面；Firebase 資料庫本身的安全靠 Firebase 規則。
+    </div>
+    <div class="modal-field">
+      <label>目前密碼</label>
+      <input type="password" id="pwd-old">
+    </div>
+    <div class="modal-field">
+      <label>新密碼（至少 4 字元）</label>
+      <input type="password" id="pwd-new">
+    </div>
+    <div class="modal-field">
+      <label>再次輸入新密碼</label>
+      <input type="password" id="pwd-new2">
+    </div>
+    <div id="pwd-change-err" style="color:var(--red);font-size:0.85rem;min-height:1.2em;margin-bottom:0.5rem"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmChangePassword()">確認修改</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('show');
+}
+
+async function confirmChangePassword() {
+  const oldPwd = document.getElementById('pwd-old').value;
+  const newPwd = document.getElementById('pwd-new').value;
+  const newPwd2 = document.getElementById('pwd-new2').value;
+  const errEl = document.getElementById('pwd-change-err');
+  const saved = localStorage.getItem(PASSWORD_STORAGE_KEY);
+
+  const oldHash = await hashPassword(oldPwd);
+  if (oldHash !== saved) { errEl.textContent = '目前密碼錯誤'; return; }
+  if (newPwd.length < 4) { errEl.textContent = '新密碼至少 4 字元'; return; }
+  if (newPwd !== newPwd2) { errEl.textContent = '兩次輸入的新密碼不一樣'; return; }
+
+  const newHash = await hashPassword(newPwd);
+  localStorage.setItem(PASSWORD_STORAGE_KEY, newHash);
+  closeModal();
+  toast('密碼已更新，記得通知朋友新密碼');
+}
 
 function start() {
   const cfgText = localStorage.getItem('memi_firebase_config');
@@ -2372,16 +2856,21 @@ function start() {
     return;
   }
   try {
-    const cfg = JSON.parse(cfgText);
-    document.getElementById('app').style.display = 'block';
-    setSync('loading', '連接 Firebase…');
-    initFirebase(cfg);
+    pendingCfg = JSON.parse(cfgText);
   } catch (e) {
     alert('Firebase 設定損壞，已清除。請重新設定。');
     localStorage.removeItem('memi_firebase_config');
     location.reload();
+    return;
   }
+  const hasPwd = !!localStorage.getItem(PASSWORD_STORAGE_KEY);
+  showPasswordGate(hasPwd ? 'verify' : 'set');
 }
+
+window.submitPassword = submitPassword;
+window.resetAllAndReload = resetAllAndReload;
+window.showChangePasswordModal = showChangePasswordModal;
+window.confirmChangePassword = confirmChangePassword;
 
 window.addEventListener('firebase-ready', start);
 </script>
