@@ -2472,11 +2472,13 @@ function showExchangeModal() {
 
     <div class="modal-field">
       <label>③ 對方付現金（可空）</label>
+      <input type="text" inputmode="decimal" id="ex-cash" placeholder="金額（當地貨幣）" value="" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.7rem;font-family:var(--font-mono);font-size:1rem;margin-bottom:0.4rem" onchange="recalcExchangeCost()" onblur="recalcExchangeCost()">
       <div style="display:flex;gap:0.5rem;align-items:center">
-        <input type="text" inputmode="decimal" id="ex-cash" placeholder="金額" value="" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.7rem;font-family:var(--font-mono)" onchange="recalcExchangeCost()" onblur="recalcExchangeCost()">
-        <select id="ex-cash-currency" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;font-size:0.82rem" onchange="document.getElementById('ex-cash-rate').value = (DEFAULT_RATES[this.value] || 1); recalcExchangeCost()">
+        <label style="font-size:0.78rem;color:var(--text-dim);min-width:auto">貨幣</label>
+        <select id="ex-cash-currency" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;font-size:0.82rem" onchange="document.getElementById('ex-cash-rate').value = (DEFAULT_RATES[this.value] || 1); recalcExchangeCost()">
           ${CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('')}
         </select>
+        <label style="font-size:0.78rem;color:var(--text-dim)">匯率</label>
         <input type="text" inputmode="decimal" id="ex-cash-rate" value="1" style="width:80px;font-size:0.82rem;font-family:var(--font-mono);background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.4rem" onchange="recalcExchangeCost()" onblur="recalcExchangeCost()" title="匯率">
       </div>
       <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">
@@ -2579,9 +2581,9 @@ function recalcExchangeCost() {
   if (costEl) costEl.value = inCost.toFixed(2);
   const hintEl = document.getElementById('ex-cost-hint');
   if (hintEl) {
-    if (cashHKD > 0) hintEl.textContent = `（${fmt(outCost)} 換出 − ${fmt(cashHKD)} 收現金 = ${fmt(inCost)}，其中 ${fmt(cashHKD)} 算銷售）`;
-    else if (cashHKD < 0) hintEl.textContent = `（${fmt(outCost)} 換出 + ${fmt(-cashHKD)} 付現金 = ${fmt(inCost)}）`;
-    else hintEl.textContent = `（= ${fmt(outCost)} 換出成本）`;
+    if (cashHKD > 0) hintEl.textContent = `(換出 ${fmt(outCost)} - 客人付 ${fmt(cashHKD)} = 換入成本 ${fmt(inCost)}，現金 ${fmt(cashHKD)} 算銷售)`;
+    else if (cashHKD < 0) hintEl.textContent = `(換出 ${fmt(outCost)} + 你補 ${fmt(-cashHKD)} = 換入成本 ${fmt(inCost)})`;
+    else hintEl.textContent = `(= 換出成本 ${fmt(outCost)})`;
   }
 }
 
