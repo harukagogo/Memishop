@@ -2471,13 +2471,13 @@ function showExchangeModal() {
     </div>
 
     <div class="modal-field">
-      <label>③ 對方付現金 HKD（可空）</label>
+      <label>③ 對方付現金（可空）</label>
       <div style="display:flex;gap:0.5rem;align-items:center">
-        <input type="number" id="ex-cash" step="0.01" value="0" style="flex:1" onchange="recalcExchangeCost()">
+        <input type="text" inputmode="decimal" id="ex-cash" placeholder="金額" value="" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.7rem;font-family:var(--font-mono)" onchange="recalcExchangeCost()" onblur="recalcExchangeCost()">
         <select id="ex-cash-currency" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;font-size:0.82rem" onchange="document.getElementById('ex-cash-rate').value = (DEFAULT_RATES[this.value] || 1); recalcExchangeCost()">
           ${CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('')}
         </select>
-        <input type="number" id="ex-cash-rate" step="0.0001" value="1" style="width:80px;font-size:0.82rem;font-family:var(--font-mono)" onchange="recalcExchangeCost()" title="匯率">
+        <input type="text" inputmode="decimal" id="ex-cash-rate" value="1" style="width:80px;font-size:0.82rem;font-family:var(--font-mono);background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.4rem" onchange="recalcExchangeCost()" onblur="recalcExchangeCost()" title="匯率">
       </div>
       <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">
         客人額外付現金給你 → 填正數（部分算成銷售）<br>
@@ -2504,6 +2504,12 @@ function showExchangeModal() {
       <button class="btn btn-primary" onclick="confirmExchange()">確認換卡</button>
     </div>`;
   document.getElementById('modal-backdrop').classList.add('show');
+
+  // 預設現金貨幣為 MOP（如果有設預設匯率）
+  const cashCurEl = document.getElementById('ex-cash-currency');
+  const cashRateEl = document.getElementById('ex-cash-rate');
+  if (cashCurEl) cashCurEl.value = 'MOP';
+  if (cashRateEl) cashRateEl.value = DEFAULT_RATES.MOP || 0.97;
 
   // 預存類別選項供換入列使用
   window._exCatOpts = catOpts;
