@@ -389,6 +389,16 @@
       <button class="btn" onclick="resetFirebaseConfig()" style="color:var(--red)">重設 Firebase</button>
     </div>
     <div class="breakdown-section">
+      <h3 class="breakdown-title">月度銷售與盈虧 · 按月統計</h3>
+      <div id="monthly-host"></div>
+    </div>
+
+    <div class="breakdown-section">
+      <h3 class="breakdown-title">各貨幣銷售 · 看哪裡賣得多</h3>
+      <div id="currency-host"></div>
+    </div>
+
+    <div class="breakdown-section">
       <h3 class="breakdown-title">按商品分類 · 庫存現值與損益</h3>
       <div id="breakdown-host"></div>
     </div>
@@ -527,7 +537,9 @@ const state = {
 // 表格排序狀態：按 kind 分別記錄。null = 不排序（陣列自然順序）
 const sortState = {
   purchases: null, boxes: null, packets: null, cards: null, openings: null, sales: null, exchanges: null,
-  breakdown: { field: 'market', dir: 'desc' }  // 預設按現值降序
+  breakdown: { field: 'market', dir: 'desc' },
+  monthly: { field: 'month', dir: 'desc' },  // 預設最新月份在上
+  currency: { field: 'amount_hkd', dir: 'desc' }
 };
 
 function toggleSort(kind, field) {
@@ -537,8 +549,8 @@ function toggleSort(kind, field) {
   } else if (cur.dir === 'asc') {
     sortState[kind] = { field, dir: 'desc' };
   } else {
-    // Breakdown 一定要有排序（預設按現值降序）；其他可以回到自然順序
-    if (kind === 'breakdown') {
+    // 這些表一定要有排序（預設值）；其他可以回到自然順序
+    if (kind === 'breakdown' || kind === 'monthly' || kind === 'currency') {
       sortState[kind] = { field, dir: 'asc' };
     } else {
       sortState[kind] = null;
@@ -977,6 +989,8 @@ function renderDashboard() {
       ${c.sub ? `<div class="metric-sub">${c.sub}</div>` : ''}
     </div>`;
   }).join('');
+  renderMonthly();
+  renderCurrencyBreakdown();
   renderBreakdown();
 }
 
@@ -1025,6 +1039,147 @@ function renderBreakdown() {
       ? `<span onclick="showImagePreview('${escapeHTML(g.name).replace(/'/g, "\\'")}','${escapeHTML(imgUrl).replace(/'/g, "\\'")}')" style="cursor:pointer;color:var(--gold);border-bottom:1px dashed var(--gold-dim)" title="點擊查看圖片">${escapeHTML(g.name)}</span>`
       : escapeHTML(g.name);
     html += `<tr><td>${clickable}</td><td class="num">${g.box || '—'}</td><td class="num">${g.packet || '—'}</td><td class="num">${g.card || '—'}</td><td class="num">${fmt(g.unit_cost)}</td><td class="num">${fmt(g.unit_market)}</td><td class="num">${fmt(g.cost)}</td><td class="num">${fmt(g.market)}</td><td class="num ${plCls}">${plSign}${fmt(pl)}</td></tr>`;
+  }
+  html += '</tbody></table></div>';
+  host.innerHTML = html;
+}
+
+// ===== 月度統計 =====
+function renderMonthly() {
+  const host = document.getElementById('monthly-host');
+  if (!host) return;
+
+  // 計算每筆銷售的成本（用快取避免重複查）
+  const saleCost = (s) => {
+    if (s.item_type === 'box') { const b = state.boxes.find(x => x.id === s.item_id); return b ? num(b.cost_hkd) : 0; }
+    if (s.item_type === 'packet') { const p = state.packets.find(x => x.id === s.item_id); return p ? num(p.cost_hkd) : 0; }
+    if (s.item_type === 'card') { const c = state.cards.find(x => x.id === s.item_id); return c ? num(c.cost_hkd) : 0; }
+    if (s.item_type === 'other') return num(s.cost_hkd_manual);
+    return 0;
+  };
+
+  const months = {};
+  const ensure = (m) => {
+    if (!months[m]) months[m] = { month: m, sale_count: 0, sale_total: 0, sale_pl: 0, buy_count: 0, buy_total: 0, opening_count: 0, exchange_count: 0 };
+    return months[m];
+  };
+
+  for (const s of state.sales) {
+    if (!s.date) continue;
+    const m = s.date.slice(0, 7); // YYYY-MM
+    const row = ensure(m);
+    row.sale_count++;
+    row.sale_total += num(s.amount_hkd);
+    row.sale_pl += num(s.amount_hkd) - saleCost(s);
+  }
+  for (const p of state.purchases) {
+    if (!p.date) continue;
+    const m = p.date.slice(0, 7);
+    const row = ensure(m);
+    row.buy_count++;
+    row.buy_total += num(p.unit_price) * num(p.rate) * num(p.qty);
+  }
+  for (const o of state.openings) {
+    if (!o.date) continue;
+    ensure(o.date.slice(0, 7)).opening_count++;
+  }
+  for (const ex of state.exchanges) {
+    if (!ex.date) continue;
+    ensure(ex.date.slice(0, 7)).exchange_count++;
+  }
+
+  const items = Object.values(months);
+  if (items.length === 0) { host.innerHTML = '<div class="empty-state">尚無資料</div>'; return; }
+
+  const rows = sortArray(items, 'monthly', (r, f) => r[f]);
+
+  let html = '<div style="overflow-x:auto"><table class="breakdown-table"><thead><tr>';
+  html += sortableTh('monthly','month','月份');
+  html += sortableTh('monthly','buy_total','買入 HKD','text-align:right');
+  html += sortableTh('monthly','buy_count','買入筆數','text-align:right');
+  html += sortableTh('monthly','sale_total','銷售 HKD','text-align:right');
+  html += sortableTh('monthly','sale_pl','盈虧 HKD','text-align:right');
+  html += sortableTh('monthly','sale_count','銷售筆數','text-align:right');
+  html += sortableTh('monthly','opening_count','開箱','text-align:right');
+  html += sortableTh('monthly','exchange_count','換卡','text-align:right');
+  html += '</tr></thead><tbody>';
+  for (const r of rows) {
+    const plCls = r.sale_pl >= 0 ? 'positive' : 'negative';
+    const plSign = r.sale_pl >= 0 ? '+' : '';
+    html += `<tr>
+      <td style="font-family:var(--font-mono)">${escapeHTML(r.month)}</td>
+      <td class="num">${r.buy_total > 0 ? fmt(r.buy_total) : '—'}</td>
+      <td class="num">${r.buy_count || '—'}</td>
+      <td class="num">${r.sale_total > 0 ? fmt(r.sale_total) : '—'}</td>
+      <td class="num ${plCls}">${r.sale_count > 0 ? plSign + fmt(r.sale_pl) : '—'}</td>
+      <td class="num">${r.sale_count || '—'}</td>
+      <td class="num">${r.opening_count || '—'}</td>
+      <td class="num">${r.exchange_count || '—'}</td>
+    </tr>`;
+  }
+  html += '</tbody></table></div>';
+  host.innerHTML = html;
+}
+
+// ===== 各貨幣銷售統計 =====
+function renderCurrencyBreakdown() {
+  const host = document.getElementById('currency-host');
+  if (!host) return;
+
+  const saleCost = (s) => {
+    if (s.item_type === 'box') { const b = state.boxes.find(x => x.id === s.item_id); return b ? num(b.cost_hkd) : 0; }
+    if (s.item_type === 'packet') { const p = state.packets.find(x => x.id === s.item_id); return p ? num(p.cost_hkd) : 0; }
+    if (s.item_type === 'card') { const c = state.cards.find(x => x.id === s.item_id); return c ? num(c.cost_hkd) : 0; }
+    if (s.item_type === 'other') return num(s.cost_hkd_manual);
+    return 0;
+  };
+
+  const byCurrency = {};
+  for (const s of state.sales) {
+    const cur = s.currency || '?';
+    if (!byCurrency[cur]) byCurrency[cur] = { currency: cur, count: 0, amount_local: 0, amount_hkd: 0, pl: 0 };
+    byCurrency[cur].count++;
+    byCurrency[cur].amount_local += num(s.amount_local);
+    byCurrency[cur].amount_hkd += num(s.amount_hkd);
+    byCurrency[cur].pl += num(s.amount_hkd) - saleCost(s);
+  }
+
+  const items = Object.values(byCurrency);
+  if (items.length === 0) { host.innerHTML = '<div class="empty-state">尚無銷售記錄</div>'; return; }
+
+  const totalHKD = items.reduce((s, x) => s + x.amount_hkd, 0);
+  for (const r of items) r.pct = totalHKD > 0 ? (r.amount_hkd / totalHKD * 100) : 0;
+
+  const rows = sortArray(items, 'currency', (r, f) => r[f]);
+
+  // 貨幣 → 地區提示
+  const hint = { HKD: '香港', MOP: '澳門', JPY: '日本', CNY: '中國大陸', USD: '美國', TWD: '台灣' };
+
+  let html = '<div style="overflow-x:auto"><table class="breakdown-table"><thead><tr>';
+  html += sortableTh('currency','currency','貨幣');
+  html += sortableTh('currency','count','筆數','text-align:right');
+  html += sortableTh('currency','amount_local','當地總額','text-align:right');
+  html += sortableTh('currency','amount_hkd','換算 HKD','text-align:right');
+  html += sortableTh('currency','pct','佔比','text-align:right');
+  html += sortableTh('currency','pl','盈虧 HKD','text-align:right');
+  html += '</tr></thead><tbody>';
+  for (const r of rows) {
+    const plCls = r.pl >= 0 ? 'positive' : 'negative';
+    const plSign = r.pl >= 0 ? '+' : '';
+    const region = hint[r.currency] ? `<span style="color:var(--text-dim);font-size:0.72rem;margin-left:0.3rem">${hint[r.currency]}</span>` : '';
+    // 簡單長條圖
+    const barWidth = Math.max(0, Math.min(100, r.pct));
+    html += `<tr>
+      <td><strong style="color:var(--gold);font-family:var(--font-mono)">${escapeHTML(r.currency)}</strong>${region}</td>
+      <td class="num">${r.count}</td>
+      <td class="num">${fmt(r.amount_local)}</td>
+      <td class="num emphasis">${fmt(r.amount_hkd)}</td>
+      <td class="num" style="position:relative;min-width:90px">
+        <div style="position:absolute;left:0;top:50%;transform:translateY(-50%);width:${barWidth}%;height:60%;background:linear-gradient(90deg,var(--gold-dim),var(--gold));opacity:0.18;border-radius:2px;z-index:0"></div>
+        <span style="position:relative;z-index:1">${r.pct.toFixed(1)}%</span>
+      </td>
+      <td class="num ${plCls}">${plSign}${fmt(r.pl)}</td>
+    </tr>`;
   }
   html += '</tbody></table></div>';
   host.innerHTML = html;
@@ -1431,11 +1586,18 @@ function renderExchanges() {
   let rows = '', mobile = '';
   for (const e of sorted) {
     const ex = e.ex;
+    const cashHKD = num(ex.cash_hkd);
+    const cashDisplay = cashHKD > 0
+      ? `<span style="color:var(--green)">收 ${fmt(cashHKD)}</span>`
+      : cashHKD < 0
+        ? `<span style="color:var(--red)">付 ${fmt(-cashHKD)}</span>`
+        : '<span style="color:var(--text-muted)">—</span>';
     rows += `<tr>
       <td style="padding:0.55rem 0.7rem">${escapeHTML(ex.date)}</td>
       <td style="padding:0.55rem 0.7rem">${escapeHTML(e.outLabel)}</td>
       <td style="padding:0.55rem 0.7rem;color:var(--gold)">→</td>
       <td style="padding:0.55rem 0.7rem">${escapeHTML(e.inLabel)}</td>
+      <td class="computed">${cashDisplay}</td>
       <td class="computed">${fmt(e.cost)}</td>
       <td style="padding:0.55rem 0.7rem">${escapeHTML(ex.note || '')}</td>
       <td><button class="row-del" onclick="deleteExchange('${ex.id}')">✕</button></td>
@@ -1448,6 +1610,7 @@ function renderExchanges() {
       <div class="mobile-card-grid">
         <div class="mobile-card-field full"><label>換出（我的）</label><div class="computed-val" style="text-align:left;font-family:inherit;font-size:0.8rem">${escapeHTML(e.outLabel)}</div></div>
         <div class="mobile-card-field full"><label>換入（客人的）</label><div class="computed-val" style="text-align:left;font-family:inherit;font-size:0.8rem">${escapeHTML(e.inLabel)}</div></div>
+        ${cashHKD !== 0 ? `<div class="mobile-card-field"><label>現金</label><div class="computed-val">${cashDisplay}</div></div>` : ''}
         <div class="mobile-card-field"><label>換入成本 HKD</label><div class="computed-val">${fmt(e.cost)}</div></div>
         ${ex.note ? `<div class="mobile-card-field full"><label>備註</label><div class="computed-val" style="text-align:left;font-family:inherit">${escapeHTML(ex.note)}</div></div>` : ''}
       </div>
@@ -1455,7 +1618,7 @@ function renderExchanges() {
     </div>`;
   }
   host.innerHTML = `<div class="table-wrapper"><table class="data-table"><thead><tr>
-    ${sortableTh('exchanges','date','日期')}${sortableTh('exchanges','out','換出（我的）')}<th></th>${sortableTh('exchanges','in','換入（客人的）')}${sortableTh('exchanges','cost','換入成本 HKD')}<th>備註</th><th></th>
+    ${sortableTh('exchanges','date','日期')}${sortableTh('exchanges','out','換出（我的）')}<th></th>${sortableTh('exchanges','in','換入（客人的）')}<th>現金</th>${sortableTh('exchanges','cost','換入成本 HKD')}<th>備註</th><th></th>
   </tr></thead><tbody>${rows}</tbody></table></div>
   <div class="mobile-cards">${mobile}</div>`;
 }
@@ -2341,17 +2504,32 @@ function showExchangeModal() {
     </div>
 
     <div class="modal-field">
-      <label>③ 換入總成本 HKD</label>
+      <label>③ 對方付現金 HKD（可空）</label>
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <input type="number" id="ex-cash" step="0.01" value="0" style="flex:1" oninput="recalcExchangeCost()">
+        <select id="ex-cash-currency" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.4rem;font-size:0.82rem" onchange="document.getElementById('ex-cash-rate').value = (DEFAULT_RATES[this.value] || 1); recalcExchangeCost()">
+          ${CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('')}
+        </select>
+        <input type="number" id="ex-cash-rate" step="0.0001" value="1" style="width:80px;font-size:0.82rem;font-family:var(--font-mono)" oninput="recalcExchangeCost()" title="匯率">
+      </div>
+      <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">
+        客人額外付現金給你 → 填正數（部分算成銷售）<br>
+        你補現金給客人 → 填負數（加進換入成本）
+      </div>
+    </div>
+
+    <div class="modal-field">
+      <label>④ 換入總成本 HKD <span id="ex-cost-hint" style="color:var(--text-dim);font-size:0.72rem;margin-left:0.5rem"></span></label>
       <div style="display:flex;gap:0.5rem;align-items:center">
         <input type="number" id="ex-cost" step="0.01" value="0" style="flex:1">
-        <button class="btn" onclick="recalcExchangeCost()" style="font-size:0.75rem;white-space:nowrap">⟳ 用換出成本</button>
+        <button class="btn" onclick="recalcExchangeCost()" style="font-size:0.75rem;white-space:nowrap">⟳ 重算</button>
       </div>
-      <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">預設 = 換出去東西的成本總和；如有補差價可自己改</div>
+      <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">預設 = 換出成本 − 客人付的現金</div>
     </div>
 
     <div class="modal-field">
       <label>備註</label>
-      <input type="text" id="ex-note" placeholder="例如：跟客人 A 換、補了 50 蚊差價等">
+      <input type="text" id="ex-note" placeholder="例如：跟客人 A 換">
     </div>
 
     <div class="modal-actions">
@@ -2418,21 +2596,37 @@ function getExchangeOutTargets() {
 
 function recalcExchangeCost() {
   const result = getExchangeOutTargets();
-  if (result.error) return; // 別打斷，等確認時再報錯
-  const total = result.targets.reduce((s, t) => s + t.cost, 0);
-  document.getElementById('ex-cost').value = total.toFixed(2);
+  if (result.error) return;
+  const outCost = result.targets.reduce((s, t) => s + t.cost, 0);
+  const cashLocal = num(document.getElementById('ex-cash')?.value);
+  const cashRate = num(document.getElementById('ex-cash-rate')?.value, 1);
+  const cashHKD = cashLocal * cashRate;
+  const inCost = outCost - cashHKD;
+  const costEl = document.getElementById('ex-cost');
+  if (costEl) costEl.value = inCost.toFixed(2);
+  const hintEl = document.getElementById('ex-cost-hint');
+  if (hintEl) {
+    if (cashHKD > 0) hintEl.textContent = `（${fmt(outCost)} 換出 − ${fmt(cashHKD)} 收現金 = ${fmt(inCost)}，其中 ${fmt(cashHKD)} 算銷售）`;
+    else if (cashHKD < 0) hintEl.textContent = `（${fmt(outCost)} 換出 + ${fmt(-cashHKD)} 付現金 = ${fmt(inCost)}）`;
+    else hintEl.textContent = `（= ${fmt(outCost)} 換出成本）`;
+  }
 }
 
 function confirmExchange() {
   const date = document.getElementById('ex-date').value;
   const note = document.getElementById('ex-note').value.trim();
   const costHKD = num(document.getElementById('ex-cost').value);
+  const cashLocal = num(document.getElementById('ex-cash').value);
+  const cashCurrency = document.getElementById('ex-cash-currency').value;
+  const cashRate = num(document.getElementById('ex-cash-rate').value, 1);
+  const cashHKD = cashLocal * cashRate;
 
   // 換出
   const outResult = getExchangeOutTargets();
   if (outResult.error) { toast(outResult.error, true); return; }
   const outTargets = outResult.targets;
   if (outTargets.length === 0) { toast('請選擇至少一個換出的庫存', true); return; }
+  const outCost = outTargets.reduce((s, t) => s + t.cost, 0);
 
   // 換入
   const inRows = Array.from(document.querySelectorAll('.ex-in-row'));
@@ -2444,7 +2638,7 @@ function confirmExchange() {
     let number = row.querySelector('.ex-in-number').value.trim();
     const name = row.querySelector('.ex-in-name').value.trim();
     const qty = Math.max(1, Math.floor(num(row.querySelector('.ex-in-qty').value)));
-    if (!product && !name && !number) continue; // 空列略過
+    if (!product && !name && !number) continue;
     inItems.push({ type, cat, product, number, name, qty });
   }
   if (inItems.length === 0) { toast('請填寫至少一項換進來的東西', true); return; }
@@ -2478,11 +2672,42 @@ function confirmExchange() {
     }
   }
 
+  // 如果客人付了現金（cashHKD > 0），自動建立一筆「散包/散卡銷售」配套：
+  //  - 售價 = 現金 HKD
+  //  - 成本 = 換出成本中對應分擔的那部分 = cashHKD（這樣盈虧 = 0，因為換是平的）
+  //  - 賣的成本就由「換出庫存的成本」中分出來，剩下的算進「換入卡的成本」（已透過 costHKD = outCost - cashHKD 處理）
+  let companionSaleId = null;
+  if (cashHKD > 0) {
+    const sale = {
+      id: uuid(),
+      date,
+      item_type: 'other',
+      item_id: null,
+      currency: cashCurrency,
+      rate: cashRate,
+      amount_local: cashLocal,
+      amount_hkd: cashHKD,
+      description: '換卡時收現金',
+      cost_hkd_manual: cashHKD,
+      note: `配套換卡（${date}）：客人加付現金的部分`,
+      exchange_id: exchangeId
+    };
+    state.sales.unshift(sale);
+    companionSaleId = sale.id;
+    saveKey('sales', state.sales);
+  }
+
   const exchange = {
     id: exchangeId, date,
     out_items: outTargets.map(t => ({ type: t.type, id: t.id })),
     in_items: inItemRefs,
     cost_hkd: costHKD,
+    out_total_cost: outCost,
+    cash_local: cashLocal,
+    cash_currency: cashCurrency,
+    cash_rate: cashRate,
+    cash_hkd: cashHKD,
+    companion_sale_id: companionSaleId,
     note
   };
   state.exchanges.unshift(exchange);
@@ -2491,7 +2716,12 @@ function confirmExchange() {
   saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
   closeModal();
   renderAll();
-  toast(`已記錄換卡：換出 ${outTargets.length} 項，換入 ${inItemRefs.length} 項`);
+  const msg = cashHKD > 0
+    ? `已記錄換卡 + ${fmt(cashHKD)} 現金銷售`
+    : cashHKD < 0
+      ? `已記錄換卡（你付了 ${fmt(-cashHKD)} 補差）`
+      : `已記錄換卡：換出 ${outTargets.length} 項，換入 ${inItemRefs.length} 項`;
+  toast(msg);
 }
 
 function deleteExchange(id) {
@@ -2526,6 +2756,11 @@ function deleteExchange(id) {
   state.cards = state.cards.filter(c => !inCardIds.includes(c.id));
 
   state.exchanges = state.exchanges.filter(x => x.id !== id);
+  // 連帶刪掉配套銷售（如果有）
+  if (ex.companion_sale_id) {
+    state.sales = state.sales.filter(s => s.id !== ex.companion_sale_id);
+    saveKey('sales', state.sales);
+  }
   saveKey('exchanges', state.exchanges);
   saveKey('boxes', state.boxes); saveKey('packets', state.packets); saveKey('cards', state.cards);
   renderAll();
