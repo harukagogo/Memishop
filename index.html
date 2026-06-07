@@ -693,12 +693,11 @@ function syncDefaultRates() {
   }
 }
 
-async function initFirebase(cfg) {
-  const { initializeApp, getDatabase, ref, onValue, set, getAuth, signInAnonymously } = window.firebaseImports;
+// 連線 + 匿名登入（只做一次），成功後 db 可用
+async function connectFirebase(cfg) {
+  const { initializeApp, getDatabase, getAuth, signInAnonymously } = window.firebaseImports;
   firebaseApp = initializeApp(cfg);
   db = getDatabase(firebaseApp);
-
-  // 匿名登入：資料庫規則要求已登入才能讀寫
   try {
     const auth = getAuth(firebaseApp);
     await signInAnonymously(auth);
@@ -710,7 +709,26 @@ async function initFirebase(cfg) {
     toast(msg, true);
     throw e;
   }
+}
 
+// 讀取雲端密碼 hash（一次性）；無則回 null
+function readAuthHash() {
+  return new Promise((resolve, reject) => {
+    const { ref, onValue } = window.firebaseImports;
+    const r = ref(db, 'memi/auth_hash');
+    onValue(r, snap => resolve(snap.val() || null), err => reject(err), { onlyOnce: true });
+  });
+}
+
+// 寫入雲端密碼 hash
+function writeAuthHash(hash) {
+  const { ref, set } = window.firebaseImports;
+  return set(ref(db, 'memi/auth_hash'), hash);
+}
+
+// 掛上所有資料的即時同步 listener
+function attachListeners() {
+  const { ref, onValue } = window.firebaseImports;
   for (const key of DATA_KEYS) {
     const r = ref(db, 'memi/' + key);
     onValue(r, snapshot => {
@@ -2941,9 +2959,8 @@ window.showImagePreview = showImagePreview;
 window.saveProductImage = saveProductImage;
 Object.defineProperty(window, 'DEFAULT_RATES', { get: () => DEFAULT_RATES });
 
-// ===== 密碼保護 =====
-const PASSWORD_STORAGE_KEY = 'memi_password_hash';
-let pendingCfg = null;
+// ===== 密碼保護（共用密碼，存雲端）=====
+let cloudAuthHash = null; // 從 Firebase 讀到的密碼 hash
 
 async function hashPassword(pwd) {
   const data = new TextEncoder().encode(pwd);
@@ -2958,7 +2975,7 @@ function showPasswordGate(mode) {
   const confirmEl = document.getElementById('pwd-input-confirm');
   if (mode === 'set') {
     document.getElementById('pwd-title').textContent = '設定密碼（第一次）';
-    document.getElementById('pwd-desc').textContent = '請設定一個密碼，之後每次開啟都要輸入。和澳門朋友共用同一組密碼。';
+    document.getElementById('pwd-desc').textContent = '請設定一個密碼，所有裝置共用同一組密碼。和澳門朋友一起用這個密碼。';
     confirmEl.style.display = 'block';
   } else {
     document.getElementById('pwd-title').textContent = '輸入密碼';
@@ -2975,38 +2992,41 @@ async function submitPassword() {
   const input = document.getElementById('pwd-input').value;
   const confirmInput = document.getElementById('pwd-input-confirm').value;
   const errEl = document.getElementById('pwd-error');
-  const saved = localStorage.getItem(PASSWORD_STORAGE_KEY);
   if (!input) { errEl.textContent = '請輸入密碼'; return; }
-  if (!saved) {
+
+  if (!cloudAuthHash) {
+    // 第一次設定：寫到雲端
     if (input.length < 4) { errEl.textContent = '密碼請至少 4 個字元'; return; }
     if (input !== confirmInput) { errEl.textContent = '兩次輸入的密碼不一樣'; return; }
     const hash = await hashPassword(input);
-    localStorage.setItem(PASSWORD_STORAGE_KEY, hash);
+    try {
+      await writeAuthHash(hash);
+      cloudAuthHash = hash;
+    } catch (e) {
+      errEl.textContent = '儲存密碼失敗：' + (e.message || e);
+      return;
+    }
     errEl.textContent = '';
-    await afterPasswordOK();
+    afterPasswordOK();
   } else {
+    // 驗證雲端密碼
     const hash = await hashPassword(input);
-    if (hash !== saved) { errEl.textContent = '密碼錯誤'; return; }
+    if (hash !== cloudAuthHash) { errEl.textContent = '密碼錯誤'; return; }
     errEl.textContent = '';
-    await afterPasswordOK();
+    afterPasswordOK();
   }
 }
 
-async function afterPasswordOK() {
+function afterPasswordOK() {
   document.getElementById('password-gate').style.display = 'none';
   document.getElementById('app').style.display = 'block';
-  setSync('loading', '連接 Firebase…');
-  try {
-    await initFirebase(pendingCfg);
-  } catch (e) {
-    // 錯誤已在 initFirebase 內顯示
-  }
+  setSync('loading', '載入資料…');
+  attachListeners();
 }
 
 function resetAllAndReload() {
-  if (!confirm('確定要清除本機設定？這會清除：\n• Firebase 設定\n• 密碼\n\n（雲端資料不會被刪除。下次可重新貼 Firebase 設定與輸入密碼繼續使用）')) return;
+  if (!confirm('確定要清除本機的 Firebase 設定？\n\n（雲端資料和密碼不會被刪除。下次重新貼 Firebase 設定即可繼續使用）')) return;
   localStorage.removeItem('memi_firebase_config');
-  localStorage.removeItem(PASSWORD_STORAGE_KEY);
   location.reload();
 }
 
@@ -3014,7 +3034,7 @@ function showChangePasswordModal() {
   document.getElementById('modal-content').innerHTML = `
     <h3>修改密碼</h3>
     <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.8rem;line-height:1.6">
-      修改後你和朋友都需要重新用新密碼進入。
+      修改後所有裝置（包括澳門朋友）都要用新密碼進入。
     </div>
     <div class="modal-field"><label>目前密碼</label><input type="password" id="pwd-old"></div>
     <div class="modal-field"><label>新密碼（至少 4 字元）</label><input type="password" id="pwd-new"></div>
@@ -3032,33 +3052,57 @@ async function confirmChangePassword() {
   const newPwd = document.getElementById('pwd-new').value;
   const newPwd2 = document.getElementById('pwd-new2').value;
   const errEl = document.getElementById('pwd-change-err');
-  const saved = localStorage.getItem(PASSWORD_STORAGE_KEY);
   const oldHash = await hashPassword(oldPwd);
-  if (oldHash !== saved) { errEl.textContent = '目前密碼錯誤'; return; }
+  if (oldHash !== cloudAuthHash) { errEl.textContent = '目前密碼錯誤'; return; }
   if (newPwd.length < 4) { errEl.textContent = '新密碼至少 4 字元'; return; }
   if (newPwd !== newPwd2) { errEl.textContent = '兩次輸入的新密碼不一樣'; return; }
   const newHash = await hashPassword(newPwd);
-  localStorage.setItem(PASSWORD_STORAGE_KEY, newHash);
+  try {
+    await writeAuthHash(newHash);
+    cloudAuthHash = newHash;
+  } catch (e) {
+    errEl.textContent = '更新失敗：' + (e.message || e);
+    return;
+  }
   closeModal();
-  toast('密碼已更新，記得通知朋友新密碼');
+  toast('密碼已更新，所有裝置都要用新密碼');
 }
 
-function start() {
+async function start() {
   const cfgText = localStorage.getItem('memi_firebase_config');
   if (!cfgText) {
     document.getElementById('setup').style.display = 'block';
     return;
   }
+  let cfg;
   try {
-    pendingCfg = JSON.parse(cfgText);
+    cfg = JSON.parse(cfgText);
   } catch (e) {
     alert('Firebase 設定損壞，已清除。請重新設定。');
     localStorage.removeItem('memi_firebase_config');
     location.reload();
     return;
   }
-  const hasPwd = !!localStorage.getItem(PASSWORD_STORAGE_KEY);
-  showPasswordGate(hasPwd ? 'verify' : 'set');
+
+  // 先連線 + 匿名登入，才能讀雲端密碼
+  setSync('loading', '連接 Firebase…');
+  try {
+    await connectFirebase(cfg);
+  } catch (e) {
+    // connectFirebase 內已顯示錯誤；停在這裡讓使用者看到訊息
+    document.getElementById('app').style.display = 'block';
+    return;
+  }
+
+  // 讀雲端密碼 hash
+  try {
+    cloudAuthHash = await readAuthHash();
+  } catch (e) {
+    cloudAuthHash = null;
+  }
+
+  // 有密碼 → 要驗證；沒有 → 設定新密碼
+  showPasswordGate(cloudAuthHash ? 'verify' : 'set');
 }
 
 window.submitPassword = submitPassword;
